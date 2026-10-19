@@ -82,6 +82,7 @@ const session = new Session({
   },
   onDone: () => { engine.chime('done'); finish(); },
   onFocus: ms => {
+    if (!scene().study) return;          // Calm and Sleep are not study time
     const k = dayKey();
     S.log[k] = (S.log[k] || 0) + ms / 60000;
     if (++focusTicks % 30 === 0) save(); // not every second; pagehide writes the rest
@@ -432,7 +433,8 @@ function paintScenes() {
 
 function renderPlans() {
   const cur = planId();
-  $('#plans').innerHTML = scene().plans.map(p =>
+  // the first entry stays the default; the unlimited option is always listed last
+  $('#plans').innerHTML = [...scene().plans].sort((a, b) => (a === 'free') - (b === 'free')).map(p =>
     `<button type="button" role="radio" data-plan="${p}" aria-checked="${p === cur}">${PLANS[p].label}</button>`).join('');
 }
 

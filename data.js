@@ -51,23 +51,23 @@ export const BREAK_MIX = { ocean: 34, wind: 12, rain: 10 };
    Live-stream ids rotate when a stream restarts (the old Lofi Girl main id already died), so every
    scene lists several and the player skips to the next one when one fails to start. */
 export const SCENES = [
-  { id: 'focus',  name: 'Focus',  icon: 'i-target', mix: { brown: 45, pink: 18 },
+  { id: 'focus',  name: 'Focus',  icon: 'i-target', study: true, mix: { brown: 45, pink: 18 },
     beat: { band: 'beta', level: 22 }, plans: ['p25', 'p50', 'free'],
     videos: ['rFZHOHl-L8A', '5yx6BWlEVcY', '3PFJ9SETS4M', '0muHFBSiybw', '1Tl2FtV06qo'] },
-  { id: 'read',   name: 'Read',   icon: 'i-book', mix: { pink: 36, rain: 16 },
+  { id: 'read',   name: 'Read',   icon: 'i-book', study: true, mix: { pink: 36, rain: 16 },
     beat: null, plans: ['p50', 'p25', 'free'],
     videos: ['jXAEIWcGXwE', 'N0snMcR6aaA', 'E_XmwjgRLz8'] },
-  { id: 'create', name: 'Create', icon: 'i-bulb', mix: { pink: 38, wind: 18, rain: 22 },
+  { id: 'create', name: 'Create', icon: 'i-bulb', study: true, mix: { pink: 38, wind: 18, rain: 22 },
     beat: { band: 'alpha', level: 20 }, plans: ['p25', 'p50', 'free'],
     videos: ['4xDzrJKXOOY', 'A8jDx9TLMQc', 'E2vONfzoyRI', 'CwPCy1GLS38'] },
-  { id: 'mask',   name: 'Mask',   icon: 'i-shield', mix: { speech: 50, brown: 20 },
+  { id: 'mask',   name: 'Mask',   icon: 'i-shield', study: true, mix: { speech: 50, brown: 20 },
     beat: null, plans: ['free', 'p25', 'p50'], videos: [] },
-  { id: 'white',  name: 'White',  icon: 'i-bars', mix: { white: 34, pink: 20 },
+  { id: 'white',  name: 'White',  icon: 'i-bars', study: true, mix: { white: 34, pink: 20 },
     beat: null, plans: ['free', 'p25', 'p50'], videos: [] },
   { id: 'calm',   name: 'Calm',   icon: 'i-leaf', mix: { ocean: 40, wind: 14, rain: 10 },
     beat: null, plans: ['t10', 't20', 'free'],
     videos: ['q_4KI-ChIIs', 'JK0pBKoK5FQ', 'GSfT7H87zq4'] },
   { id: 'sleep',  name: 'Sleep',  icon: 'i-moon', mix: { ocean: 46, brown: 22 },
-    beat: null, plans: ['t60', 't30', 't90'],
+    beat: null, plans: ['t60', 't30', 't90', 'free'],
     videos: ['nI725iVsyoQ', 'xORCbIptqcc', 'VAlMDl00mYY', 'JD-kMIpDfnY'] }
 ];
