@@ -17,9 +17,14 @@ native\bin\Murmur.exe --install
 
 Then press the Windows key and type **Murmur**. `--uninstall` removes it again.
 
-Streams and your own music play through [mpv](https://mpv.io) (`C:\mpv` or on PATH), YouTube through yt-dlp next to it. The sounds need neither.
+<p align="center"><img src="docs/mini.png" alt="Mini player" width="24%">&nbsp;&nbsp;&nbsp;<img src="docs/windows-light.png" alt="Light theme" width="62%"></p>
 
-<p align="center"><img src="docs/windows-light.png" alt="Light theme" width="66%"></p>
+- **N** shrinks it to a mini player that stays on top while you work.
+- **Right-click the taskbar icon** for one-click sessions: Focus 25 · 5, Focus 50 · 10, Read, Calm 20, Sleep 60. The same thing from a shortcut: `Murmur.exe --scene sleep --plan t60 --play`.
+- Hover the taskbar icon for previous, play and next.
+- Unplug the headphones and it pauses instead of moving to the speakers.
+
+Streams and your own music play through [mpv](https://mpv.io) (`C:\mpv` or on PATH), YouTube through yt-dlp next to it. The sounds need neither.
 
 ### Web app
 
@@ -43,7 +48,7 @@ Double-click `Start Murmur.bat`.
 | `audio.cpp` `dsp.cpp` | mixer, beats, chimes, WASAPI; the sound synthesis |
 | `session.cpp` `model.cpp` `app.cpp` | plans and timing, saved state and presets, the controller |
 | `ui.cpp` `ui_paint.cpp` `gfx.cpp` | layout and input, drawing, icons from the web sprite |
-| `window.cpp` | window, timers, drag and drop, taskbar, single instance |
+| `window.cpp` `jumplist.cpp` | window, mini player, timers, drag and drop, taskbar buttons and jump list, single instance |
 | `stream.cpp` `resolver.cpp` | mpv over a pipe; finds live streams for each scene daily |
 | `install.cpp` | per-user install and Start menu entry |
 

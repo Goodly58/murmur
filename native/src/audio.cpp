@@ -45,7 +45,11 @@ inline float softLimit(float x) {
 
 class NotifClient : public IMMNotificationClient {
  public:
-  NotifClient(std::atomic<bool>* flag, std::condition_variable* cv) : flag_(flag), cv_(cv) {}
+  NotifClient(std::atomic<bool>* flag, std::condition_variable* cv, std::atomic<bool>* lost) : flag_(flag), cv_(cv), lost_(lost) {}
+  void setCurrent(const wstring& id) {
+    std::lock_guard<std::mutex> g(mu_);
+    cur_ = id;
+  }
   virtual ~NotifClient() = default;
   ULONG STDMETHODCALLTYPE AddRef() override { return (ULONG)InterlockedIncrement(&ref_); }
   ULONG STDMETHODCALLTYPE Release() override {
@@ -62,9 +66,15 @@ class NotifClient : public IMMNotificationClient {
     *ppv = nullptr;
     return E_NOINTERFACE;
   }
-  HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { return S_OK; }
+  HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR id, DWORD state) override {
+    if (state != DEVICE_STATE_ACTIVE) gone(id);
+    return S_OK;
+  }
   HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR) override { return S_OK; }
-  HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR) override { return S_OK; }
+  HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR id) override {
+    gone(id);
+    return S_OK;
+  }
   HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow flow, ERole role, LPCWSTR) override {
     if (flow == eRender && role == eMultimedia) { flag_->store(true); cv_->notify_all(); }
     return S_OK;
@@ -72,9 +82,21 @@ class NotifClient : public IMMNotificationClient {
   HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
 
  private:
+  // the device we are rendering to is no longer active
+  void gone(LPCWSTR id) {
+    std::lock_guard<std::mutex> g(mu_);
+    if (id && !cur_.empty() && cur_ == id) {
+      lost_->store(true);
+      flag_->store(true);
+      cv_->notify_all();
+    }
+  }
   LONG ref_ = 1;
   std::atomic<bool>* flag_;
   std::condition_variable* cv_;
+  std::atomic<bool>* lost_;
+  std::mutex mu_;
+  wstring cur_;
 };
 }  // namespace
 
@@ -135,6 +157,17 @@ void Engine::setFade(double f) { std::lock_guard<std::mutex> g(mu_); p_.fade = c
 
 void Engine::play() {
   playing_ = true;
+  cv_.notify_all();
+}
+
+void Engine::simulateOutputLost() {
+  if (!realDevice_) {
+    playing_ = false;
+    if (onOutputLost) onOutputLost();
+    return;
+  }
+  lost_ = true;
+  deviceDirty_ = true;
   cv_.notify_all();
 }
 
@@ -386,11 +419,16 @@ bool Engine::openDevice() {
   if (!d.en) {
     hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&d.en);
     if (FAILED(hr)) { error_ = "no device enumerator"; return false; }
-    d.notif = new NotifClient(&deviceDirty_, &cv_);
+    d.notif = new NotifClient(&deviceDirty_, &cv_, &lost_);
     d.en->RegisterEndpointNotificationCallback(d.notif);
   }
   hr = d.en->GetDefaultAudioEndpoint(eRender, eMultimedia, &d.dev);
   if (FAILED(hr)) { error_ = "no audio output device"; return false; }
+  {
+    LPWSTR id = nullptr;
+    if (SUCCEEDED(d.dev->GetId(&id)) && id) d.notif->setCurrent(id);
+    CoTaskMemFree(id);
+  }
   hr = d.dev->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, (void**)&d.client);
   if (FAILED(hr)) { error_ = "cannot open the audio output"; closeDevice(); return false; }
 
@@ -498,12 +536,14 @@ void Engine::deviceLoop() {
     ok = ok && SUCCEEDED(d.client->Start());
     d.started = ok;
     deviceDirty_ = false;
+    lost_ = false;
+    bool failed = !ok;
     int64_t pausedAt = 0;
     while (ok && !quit_) {
-      if (deviceDirty_.exchange(false)) break;  // the default output changed: reopen on the new one
+      if (deviceDirty_.exchange(false)) break;  // the default output changed (or went away): reopen or stop
       UINT32 pad = 0;
-      if (FAILED(d.client->GetCurrentPadding(&pad))) break;
-      if (pad < target && !fill(target - pad)) break;
+      if (FAILED(d.client->GetCurrentPadding(&pad))) { failed = true; break; }
+      if (pad < target && !fill(target - pad)) { failed = true; break; }
       if (!playing_.load()) {
         if (!pausedAt) pausedAt = wallMs();
         if (wallMs() - pausedAt > 180) break;  // fade finished: release the device while paused
@@ -515,6 +555,14 @@ void Engine::deviceLoop() {
       cv_.wait_for(lk, std::chrono::milliseconds(25), [&] { return quit_.load(); });
     }
     closeDevice();
+    // A render error usually means the device was unplugged. Give the notification a moment to arrive, so the
+    // sound stops instead of jumping to the speakers.
+    if (failed && !quit_) std::this_thread::sleep_for(std::chrono::milliseconds(250));
+    if (lost_.exchange(false)) {
+      playing_ = false;
+      deviceDirty_ = false;
+      if (onOutputLost) onOutputLost();
+    }
   }
   closeDevice();
   if (dev_->en) {

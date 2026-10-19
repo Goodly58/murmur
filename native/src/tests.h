@@ -10,8 +10,11 @@ struct TestLog {
 
 void testUi(TestLog& t);
 void testResolver(TestLog& t);
+void testLaunch(TestLog& t);
+void testMini(TestLog& t);
 
 int runSelfTests(const string& only = "");
 int runDeviceTest(int seconds);
 int runLoopback(int seconds);
 int runSessionPeaks(int seconds);
+int runLostTest();

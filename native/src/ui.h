@@ -4,6 +4,8 @@
 #include "app.h"
 #include "gfx.h"
 
+constexpr float SHEET_EVIDENCE_H = 546, SHEET_KEYS_H = 410;  // modal sheet heights (DIPs)
+
 // Live spectrum of the mix on a log-frequency axis. Cheap on purpose: 15 fps, only repainted when the
 // shape has moved enough to see, and it goes back to sleep once the shape settles.
 struct Spectrum {
@@ -23,7 +25,7 @@ struct Spectrum {
 enum HitKind {
   H_NONE = 0, H_SCENE, H_PLAN, H_PREV, H_PLAY, H_NEXT, H_TILE, H_BAND, H_RESET, H_BEATMODE, H_MUTE, H_MASTER, H_BLEND,
   H_INFO, H_KEYS, H_CHIP, H_CHIPX, H_PADD, H_PUPD, H_TAB, H_LINK, H_VIDEO, H_WATCH, H_PLAYER, H_VPREV, H_VNEXT, H_VCLEAR,
-  H_FILEPICK, H_FPREV, H_FNEXT, H_FCLEAR, H_LINKGO, H_SHEETCLOSE, H_SHEETBACK, H_EVLINK, H_TOASTACT, H_PBAR, H_SIDE
+  H_FILEPICK, H_FPREV, H_FNEXT, H_FCLEAR, H_LINKGO, H_SHEETCLOSE, H_SHEETBACK, H_EVLINK, H_TOASTACT, H_PBAR, H_SIDE, H_MINI
 };
 
 struct Hit {
@@ -45,6 +47,7 @@ struct UiHooks {
   std::function<void(bool)> capture;
   // Shows a pop-up menu at a point (DIPs); returns the chosen index or -1.
   std::function<int(float x, float y, const vector<wstring>& items)> menu;
+  std::function<void()> toggleMini;  // switch between the full window and the compact player
 };
 
 class Ui {
@@ -106,11 +109,13 @@ class Ui {
   R transportRect() { ensureLayout(); return L.transport; }
   void paintAll(ID2D1RenderTarget* rt, float dpi) { paint(rt, dpi, R{0, 0, W_, H_}); }
   void startRename(const string& presetId);
+  void setMini(bool on);
+  bool mini() const { return mini_; }
 
  private:
   struct Layout {
     R top, presets, rail, stage, side, ring, spec, stats, transport;
-    R beatSeg, beatBtn[3], master, mute, info, keys;
+    R beatSeg, beatBtn[3], master, mute, info, keys, miniBtn;
     R pClip, pAdd, pUpd;
     vector<R> chip;
     vector<float> chipText;   // width available for each chip's name
@@ -132,6 +137,7 @@ class Ui {
 
   void ensureLayout() { if (layoutDirty_) build(); }
   void build();
+  void buildMini();
   void add(HitKind k, int i, const R& r, const wstring& tip = L"");
   Hit hitAt(float x, float y);
   bool hot(HitKind k, int i = 0) const { return hover_.k == k && hover_.i == i; }
@@ -148,6 +154,8 @@ class Ui {
   void paintFiles();
   void paintMix();
   void paintOverlays();
+  void paintMini();
+  void paintTransport();
   void paintSheet();
   void seg(const R& r);
   void segButton(const R& r, bool selected, bool hovered);
@@ -176,7 +184,7 @@ class Ui {
   bool dragging_ = false;
   HitKind sliderDrag_ = H_NONE;
   int sheet_ = 0;  // 0 none, 1 evidence, 2 keys
-  bool dropping_ = false, linkOpen_ = false;
+  bool dropping_ = false, linkOpen_ = false, mini_ = false;
   float sideScroll_ = 0, presetScroll_ = 0;
   bool tipPending_ = false, tipShown_ = false;
   wstring tipText_;

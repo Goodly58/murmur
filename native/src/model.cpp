@@ -225,6 +225,15 @@ bool Model::parse(const string& text, State& out) {
       d.maximized = mx && mx->boolOr(false);
     }
   }
+  if (const Json* mi = j.get("mini")) {
+    if (mi->isObj()) {
+      auto g = [&](const char* k, int def) { const Json* v = mi->get(k); return v && v->isNum() ? (int)v->n : def; };
+      const Json* on = mi->get("on");
+      d.mini = on && on->boolOr(false);
+      d.miniX = g("x", INT32_MIN);
+      d.miniY = g("y", INT32_MIN);
+    }
+  }
   out = std::move(d);
   return true;
 }
@@ -270,6 +279,13 @@ string Model::serialize() const {
   w.set("h", Json::num(s.winH));
   w.set("max", Json::boolean(s.maximized));
   if (s.winX != INT32_MIN) j.set("win", w);
+  Json mi = Json::obj();
+  mi.set("on", Json::boolean(s.mini));
+  if (s.miniX != INT32_MIN) {
+    mi.set("x", Json::num(s.miniX));
+    mi.set("y", Json::num(s.miniY));
+  }
+  j.set("mini", mi);
   return jsonString(j, 1);
 }
 

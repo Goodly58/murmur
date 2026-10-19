@@ -9,16 +9,19 @@
 #include <dxgiformat.h>
 
 #include "install.h"
+#include "jumplist.h"
 #include "net.h"
 #include "resolver.h"
 #include "ui.h"
 
 namespace {
 
-constexpr UINT WM_APP_STREAM = WM_APP + 1, WM_APP_POSTER = WM_APP + 2, WM_APP_FRESH = WM_APP + 3, WM_APP_SHOW = WM_APP + 4, WM_APP_EDITEND = WM_APP + 5;
+constexpr UINT THUMB_PREV = 1001, THUMB_PLAY = 1002, THUMB_NEXT = 1003;
+constexpr UINT WM_APP_STREAM = WM_APP + 1, WM_APP_POSTER = WM_APP + 2, WM_APP_FRESH = WM_APP + 3, WM_APP_SHOW = WM_APP + 4, WM_APP_EDITEND = WM_APP + 5, WM_APP_DEVLOST = WM_APP + 6;
 enum : UINT_PTR { T_TICK = 1, T_SPEC, T_CLOSE, T_SPIN, T_TIP, T_SAVE, T_TOAST, T_SWEEP };
 constexpr wchar_t CLASS_NAME[] = L"MurmurMainWindow";
-constexpr float MIN_W = 940, MIN_H = 640;  // client size in DIPs
+constexpr float MIN_W = 940, MIN_H = 640;    // client size in DIPs
+constexpr float MINI_W = 320, MINI_H = 484;  // the compact player's client size
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
@@ -83,16 +86,6 @@ struct PosterMsg {
   bool ok = false;
 };
 
-bool isAudioPath(const wstring& p) {
-  wstring l = p;
-  for (auto& c : l) c = (wchar_t)std::towlower(c);
-  for (const wchar_t* ext : {L".mp3", L".m4a", L".aac", L".wav", L".flac", L".ogg", L".oga", L".opus", L".weba", L".wma", L".mka"}) {
-    const size_t n = wcslen(ext);
-    if (l.size() > n && l.compare(l.size() - n, n, ext) == 0) return true;
-  }
-  return false;
-}
-
 class MainWindow;
 LRESULT CALLBACK wndProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK editProc(HWND, UINT, WPARAM, LPARAM);
@@ -142,6 +135,9 @@ class MainWindow {
   wstring lastTitle;
   int lastTaskbar = -1;
   int64_t lastRefreshMs = 0;
+  bool miniMode = false;
+  HICON thumbIcons[4] = {};  // previous, play, pause, next
+  int thumbKey = -1;
 
   // inline editor
   HWND edit = nullptr;
@@ -177,6 +173,12 @@ class MainWindow {
   void wantPoster();
   void saveState();
   void restorePlacement();
+  void capturePlacement();
+  void addThumbButtons();
+  void updateThumbButtons();
+  HICON makeThumbIcon(const char* name, bool solid);
+  void freeThumbIcons();
+  void setMini(bool on);
   void handleArgs(const vector<wstring>& args);
   void pasteClipboard();
   void pickFiles();
@@ -267,6 +269,7 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
   app = std::make_unique<App>(eng, stream);
   app->model.load(readFile(statePath));
   stream.configure();
+  eng.onOutputLost = [this] { if (hwnd) PostMessageW(hwnd, WM_APP_DEVLOST, 0, 0); };  // from the audio thread
   if (!eng.start(true)) app->showToast(L"No audio device found", L"", nullptr, 8000);
   taskbarMsg = RegisterWindowMessageW(L"TaskbarButtonCreated");
 
@@ -292,6 +295,7 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
   ui->hooks.openUrl = [](const wstring& u) { ShellExecuteW(nullptr, L"open", u.c_str(), nullptr, nullptr, SW_SHOWNORMAL); };
   ui->hooks.pickFiles = [this] { pickFiles(); };
   ui->hooks.capture = [this](bool on) { if (on) SetCapture(hwnd); else if (GetCapture() == hwnd) ReleaseCapture(); };
+  ui->hooks.toggleMini = [this] { setMini(!miniMode); };
   ui->hooks.menu = [this](float x, float y, const vector<wstring>& items) { return popup(x, y, items); };
 
   app->onChange = [this] { onAppChange(); };
@@ -310,6 +314,10 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
   applyTheme();
   restorePlacement();
   app->init();
+  if (app->model.s.mini) {
+    app->model.s.mini = false;  // setMini(true) sets it again once the window is ready
+    setMini(true);
+  }
 
   if (SUCCEEDED(OleInitialize(nullptr))) {
     drop = new DropTarget(this);
@@ -317,6 +325,11 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
   }
   handleArgs(args);
   startResolver(hwnd, WM_APP_FRESH, stream.ytdlpPath());
+  {
+    wchar_t self[MAX_PATH * 2];
+    const DWORD n = GetModuleFileNameW(nullptr, self, MAX_PATH * 2);
+    if (_wcsicmp(wstring(self, n).c_str(), installedExePath().c_str()) == 0) updateJumpList(installedExePath());
+  }
 
   ShowWindow(hwnd, app->model.s.maximized ? SW_SHOWMAXIMIZED : (showCmd == SW_SHOWMINNOACTIVE ? SW_SHOWMINNOACTIVE : SW_SHOW));
   UpdateWindow(hwnd);
@@ -366,30 +379,84 @@ void MainWindow::restorePlacement() {
   dpi = (float)GetDpiForWindow(hwnd);
 }
 
-void MainWindow::saveState() {
-  KillTimer(hwnd, T_SAVE);
+// Where the window is, in the model: the full window's rectangle, or the compact player's corner.
+void MainWindow::capturePlacement() {
   WINDOWPLACEMENT wp = {};
   wp.length = sizeof wp;
-  if (GetWindowPlacement(hwnd, &wp)) {
-    State& st = app->model.s;
-    const RECT& rc = wp.rcNormalPosition;
-    st.winX = rc.left;
-    st.winY = rc.top;
-    st.winW = (int)std::lround((rc.right - rc.left) * 96.0 / dpi);
-    st.winH = (int)std::lround((rc.bottom - rc.top) * 96.0 / dpi);
-    st.maximized = wp.showCmd == SW_SHOWMAXIMIZED;
+  if (!GetWindowPlacement(hwnd, &wp)) return;
+  State& st = app->model.s;
+  const RECT& rc = wp.rcNormalPosition;
+  if (miniMode) {
+    st.miniX = rc.left;
+    st.miniY = rc.top;
+    return;
   }
+  st.winX = rc.left;
+  st.winY = rc.top;
+  st.winW = (int)std::lround((rc.right - rc.left) * 96.0 / dpi);
+  st.winH = (int)std::lround((rc.bottom - rc.top) * 96.0 / dpi);
+  st.maximized = wp.showCmd == SW_SHOWMAXIMIZED;
+}
+
+void MainWindow::saveState() {
+  KillTimer(hwnd, T_SAVE);
+  capturePlacement();
   writeFileAtomic(statePath, app->model.serialize());
 }
 
-void MainWindow::handleArgs(const vector<wstring>& args) {
-  vector<wstring> files;
-  for (const wstring& a : args) {
-    if (a.empty() || a[0] == L'-') continue;
-    if (isAudioPath(a) && GetFileAttributesW(a.c_str()) != INVALID_FILE_ATTRIBUTES) files.push_back(a);
-    else if (!parseYouTubeLink(narrow(a)).empty()) app->pasteText(a);
+// The compact player: a small fixed-size window that stays on top of the others, so the clock is always in
+// sight while you work. Leaving it puts the full window back where it was.
+void MainWindow::setMini(bool on) {
+  if (on == miniMode || !hwnd) return;
+  if (edit) endEdit(false);
+  State& st = app->model.s;
+  capturePlacement();  // the window we are leaving: its rectangle (full) or its corner (mini)
+  if (on) {
+    if (IsZoomed(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+    miniMode = true;
+    st.mini = true;
+    ui->setMini(true);
+    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    style &= ~(LONG_PTR)(WS_THICKFRAME | WS_MAXIMIZEBOX);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+    RECT rc = {0, 0, (LONG)std::lround(MINI_W * dpi / 96.f), (LONG)std::lround(MINI_H * dpi / 96.f)};
+    AdjustWindowRectExForDpi(&rc, (DWORD)style, FALSE, 0, (UINT)dpi);
+    const int w = rc.right - rc.left, h = rc.bottom - rc.top;
+    // the lower right corner of the screen the window is on, unless it was left somewhere else last time
+    MONITORINFO mi = {};
+    mi.cbSize = sizeof mi;
+    GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+    const int margin = (int)std::lround(24 * dpi / 96.f);
+    int x = (int)mi.rcWork.right - w - margin, y = (int)mi.rcWork.bottom - h - margin;
+    if (st.miniX != INT32_MIN) {
+      const POINT pt = {st.miniX + 40, st.miniY + 20};
+      if (MonitorFromPoint(pt, MONITOR_DEFAULTTONULL)) { x = st.miniX; y = st.miniY; }
+    }
+    SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_FRAMECHANGED | SWP_NOACTIVATE);
+  } else {
+    miniMode = false;
+    st.mini = false;
+    ui->setMini(false);
+    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    style |= (WS_THICKFRAME | WS_MAXIMIZEBOX);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    restorePlacement();
+    if (st.maximized) ShowWindow(hwnd, SW_SHOWMAXIMIZED);
   }
-  if (!files.empty()) app->addFiles(files);
+  SetTimer(hwnd, T_SAVE, 300, nullptr);
+  InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void MainWindow::handleArgs(const vector<wstring>& args) {
+  Launch l = parseLaunch(args);
+  mlog("launch: %zu args, scene=%s plan=%s play=%d mini=%d full=%d links=%zu files=%zu", args.size(), l.scene.c_str(), l.plan.c_str(), (int)l.play, (int)l.mini, (int)l.full, l.links.size(), l.files.size());
+  vector<wstring> files;
+  for (const wstring& f : l.files) if (GetFileAttributesW(f.c_str()) != INVALID_FILE_ATTRIBUTES) files.push_back(f);
+  l.files = files;
+  if (l.mini) setMini(true);
+  else if (l.full) setMini(false);
+  app->applyLaunch(l);
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -450,13 +517,15 @@ void MainWindow::onSize(int w, int h) {
 
 void MainWindow::fit(int w, int h) {
   const float wd = w * 96.f / dpi, hd = h * 96.f / dpi;
-  const double z = std::min(wd / 1280.0, hd / 820.0);
+  const double z = miniMode ? 1.0 : std::min(wd / 1280.0, hd / 820.0);
   zoom = (float)(std::round(clampd(z, 1.0, 1.75) * 20.0) / 20.0);  // steps of 5%
   ui->setSize(w * 96.f / eff(), h * 96.f / eff());
 }
 
 void MainWindow::onDpi(UINT newDpi, const RECT* r) {
   dpi = (float)newDpi;
+  freeThumbIcons();
+  thumbKey = -1;
   if (r) SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
   RECT rc;
   GetClientRect(hwnd, &rc);
@@ -525,6 +594,116 @@ void MainWindow::onAppTick() {
   updateChrome();  // the title and taskbar progress show the clock while minimized
 }
 
+// ---------------------------------------------------------------------------------------------------
+// Taskbar preview buttons: previous / play-pause / next under the thumbnail when you hover the taskbar icon.
+// The glyphs are our own icons, drawn once into small bitmaps.
+// ---------------------------------------------------------------------------------------------------
+
+HICON MainWindow::makeThumbIcon(const char* name, bool solid) {
+  const int n = std::max(16, GetSystemMetricsForDpi(SM_CXSMICON, (UINT)dpi));
+  Com<IWICBitmap> bmp;
+  if (!gfx.wic || FAILED(gfx.wic->CreateBitmap((UINT)n, (UINT)n, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnDemand, bmp.put()))) return nullptr;
+  Com<ID2D1RenderTarget> target;
+  const D2D1_RENDER_TARGET_PROPERTIES props =
+      D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE, D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED), 96, 96);
+  if (FAILED(gfx.d2d->CreateWicBitmapRenderTarget(bmp.get(), props, target.put()))) return nullptr;
+  DWORD light = 0;
+  DWORD sz = sizeof light;
+  RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &sz);
+  gfx.bind(target.get(), 96);
+  target->BeginDraw();
+  target->Clear(D2D1::ColorF(0, 0, 0, 0));
+  gfx.icon(name, n / 2.f, n / 2.f, (float)n, light ? rgb(0x202124) : rgb(0xf3f4f6), solid, 2.0f);
+  const bool ok = SUCCEEDED(target->EndDraw());
+  if (!ok) return nullptr;
+
+  vector<uint32_t> px((size_t)n * n);
+  if (FAILED(bmp->CopyPixels(nullptr, (UINT)n * 4, (UINT)px.size() * 4, (BYTE*)px.data()))) return nullptr;
+  for (uint32_t& v : px) {  // premultiplied -> straight alpha, which icons expect
+    const uint32_t a = v >> 24;
+    if (a && a < 255) {
+      const uint32_t r = std::min<uint32_t>(255, ((v >> 16) & 255) * 255 / a), g2 = std::min<uint32_t>(255, ((v >> 8) & 255) * 255 / a), b = std::min<uint32_t>(255, (v & 255) * 255 / a);
+      v = (a << 24) | (r << 16) | (g2 << 8) | b;
+    }
+  }
+  BITMAPV5HEADER bi = {};
+  bi.bV5Size = sizeof bi;
+  bi.bV5Width = n;
+  bi.bV5Height = -n;
+  bi.bV5Planes = 1;
+  bi.bV5BitCount = 32;
+  bi.bV5Compression = BI_BITFIELDS;
+  bi.bV5RedMask = 0x00FF0000;
+  bi.bV5GreenMask = 0x0000FF00;
+  bi.bV5BlueMask = 0x000000FF;
+  bi.bV5AlphaMask = 0xFF000000;
+  void* bits = nullptr;
+  HDC dc = GetDC(nullptr);
+  HBITMAP color = CreateDIBSection(dc, (BITMAPINFO*)&bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+  ReleaseDC(nullptr, dc);
+  if (!color || !bits) return nullptr;
+  std::memcpy(bits, px.data(), px.size() * 4);
+  HBITMAP mask = CreateBitmap(n, n, 1, 1, nullptr);
+  ICONINFO ii = {};
+  ii.fIcon = TRUE;
+  ii.hbmMask = mask;
+  ii.hbmColor = color;
+  HICON icon = CreateIconIndirect(&ii);
+  DeleteObject(color);
+  DeleteObject(mask);
+  return icon;
+}
+
+void MainWindow::freeThumbIcons() {
+  for (HICON& h : thumbIcons) {
+    if (h) DestroyIcon(h);
+    h = nullptr;
+  }
+}
+
+void MainWindow::addThumbButtons() {
+  if (!taskbar || !hwnd) return;
+  if (!thumbIcons[0]) {
+    thumbIcons[0] = makeThumbIcon("i-prev", false);
+    thumbIcons[1] = makeThumbIcon("i-play", true);
+    thumbIcons[2] = makeThumbIcon("i-pause", true);
+    thumbIcons[3] = makeThumbIcon("i-next", false);
+  }
+  THUMBBUTTON b[3] = {};
+  const UINT ids[3] = {THUMB_PREV, THUMB_PLAY, THUMB_NEXT};
+  const wchar_t* tips[3] = {L"Restart phase", L"Play", L"Skip phase"};
+  for (int i = 0; i < 3; i++) {
+    b[i].dwMask = (THUMBBUTTONMASK)(THB_ICON | THB_TOOLTIP | THB_FLAGS);
+    b[i].iId = ids[i];
+    b[i].hIcon = thumbIcons[i == 0 ? 0 : i == 1 ? 1 : 3];
+    wcsncpy(b[i].szTip, tips[i], 259);
+    b[i].dwFlags = THBF_ENABLED;
+  }
+  const HRESULT hr = taskbar->ThumbBarAddButtons(hwnd, 3, b);
+  if (FAILED(hr)) mlog("taskbar preview buttons failed: 0x%08lx", (unsigned long)hr);
+  thumbKey = -1;
+}
+
+void MainWindow::updateThumbButtons() {
+  if (!taskbar || !thumbIcons[0]) return;
+  const SessionSnap s = app->session.snapshot();
+  const bool next = s.cycle && !s.done;
+  const int key = (app->running ? 1 : 0) | (next ? 2 : 0);
+  if (key == thumbKey) return;
+  thumbKey = key;
+  THUMBBUTTON b[3] = {};
+  const UINT ids[3] = {THUMB_PREV, THUMB_PLAY, THUMB_NEXT};
+  const wchar_t* tips[3] = {L"Restart phase", app->running ? L"Pause" : L"Play", L"Skip phase"};
+  for (int i = 0; i < 3; i++) {
+    b[i].dwMask = (THUMBBUTTONMASK)(THB_ICON | THB_TOOLTIP | THB_FLAGS);
+    b[i].iId = ids[i];
+    b[i].hIcon = i == 0 ? thumbIcons[0] : i == 1 ? thumbIcons[app->running ? 2 : 1] : thumbIcons[3];
+    wcsncpy(b[i].szTip, tips[i], 259);
+    b[i].dwFlags = (i == 2 && !next) ? THBF_DISABLED : THBF_ENABLED;
+  }
+  taskbar->ThumbBarUpdateButtons(hwnd, 3, b);
+}
+
 void MainWindow::updateChrome() {
   const SessionSnap s = app->session.snapshot();
   wstring title = L"Murmur";
@@ -537,6 +716,7 @@ void MainWindow::updateChrome() {
     lastTitle = title;
     SetWindowTextW(hwnd, title.c_str());
   }
+  updateThumbButtons();
   if (taskbar) {
     int state = TBPF_NOPROGRESS;
     ULONGLONG done = 0;
@@ -725,6 +905,8 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
   if (m == taskbarMsg && taskbarMsg) {
     if (!taskbar && SUCCEEDED(CoCreateInstance(CLSID_TaskbarList, nullptr, CLSCTX_INPROC_SERVER, IID_ITaskbarList3, (void**)&taskbar))) taskbar->HrInit();
     lastTaskbar = -1;
+    thumbKey = -1;
+    addThumbButtons();
     updateChrome();
     return 0;
   }
@@ -746,6 +928,13 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
     case WM_DPICHANGED: onDpi(HIWORD(w), (const RECT*)l); return 0;
     case WM_GETMINMAXINFO: {
       auto* mi = (MINMAXINFO*)l;
+      if (miniMode) {
+        RECT mr = {0, 0, (LONG)std::lround(MINI_W * dpi / 96.f), (LONG)std::lround(MINI_H * dpi / 96.f)};
+        AdjustWindowRectExForDpi(&mr, (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE), FALSE, 0, (UINT)dpi);
+        mi->ptMinTrackSize.x = mi->ptMaxTrackSize.x = mi->ptMaxSize.x = mr.right - mr.left;
+        mi->ptMinTrackSize.y = mi->ptMaxTrackSize.y = mi->ptMaxSize.y = mr.bottom - mr.top;
+        return 0;
+      }
       RECT rc = {0, 0, (LONG)std::lround(MIN_W * dpi / 96.f), (LONG)std::lround(MIN_H * dpi / 96.f)};
       AdjustWindowRectExForDpi(&rc, WS_OVERLAPPEDWINDOW, FALSE, 0, (UINT)dpi);
       mi->ptMinTrackSize.x = rc.right - rc.left;
@@ -829,6 +1018,19 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
       }
       return (LRESULT)editBrush;
     }
+    case WM_COMMAND:
+      if (HIWORD(w) == THBN_CLICKED) {
+        switch (LOWORD(w)) {
+          case THUMB_PREV: app->prevPhase(); break;
+          case THUMB_PLAY: app->togglePlay(); break;
+          case THUMB_NEXT: { const SessionSnap s = app->session.snapshot(); if (s.cycle && !s.done) app->nextPhase(); break; }
+          default: break;
+        }
+      }
+      return 0;
+    case WM_APP_DEVLOST:
+      app->outputLost();
+      return 0;
     case WM_APP_EDITEND:
       if ((int)l == editGen) endEdit(w != 0);
       return 0;
@@ -856,7 +1058,8 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
     case WM_COPYDATA: {
       auto* cd = (COPYDATASTRUCT*)l;
       if (cd && cd->dwData == 1 && cd->lpData) {
-        const wstring all((const wchar_t*)cd->lpData, cd->cbData / sizeof(wchar_t));
+        wstring all((const wchar_t*)cd->lpData, cd->cbData / sizeof(wchar_t));
+        while (!all.empty() && all.back() == L'\0') all.pop_back();  // the sender counts the terminator
         vector<wstring> args;
         size_t a = 0;
         for (;;) {
@@ -881,6 +1084,7 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
       app->stopAll();
       stream.shutdown();
       eng.shutdown();
+      freeThumbIcons();
       if (taskbar) { taskbar->Release(); taskbar = nullptr; }
       if (editBrush) { DeleteObject(editBrush); editBrush = nullptr; }
       hwnd = nullptr;

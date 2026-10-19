@@ -91,11 +91,15 @@ void Ui::paint(ID2D1RenderTarget* rt, float dpi, const R& dirty) {
   dirty_ = {x0, y0, std::ceil(dirty.r() * s) / s - x0, std::ceil(dirty.b() * s) / s - y0};
   g.pushClip(dirty_);
   g.fill(dirty_, g.pal.bg);
-  paintTop();
-  paintPresets();
-  paintRail();
-  paintStage();
-  paintSide();
+  if (mini_) {
+    paintMini();
+  } else {
+    paintTop();
+    paintPresets();
+    paintRail();
+    paintStage();
+    paintSide();
+  }
   paintOverlays();
   g.popClip();
 }
@@ -175,6 +179,7 @@ void Ui::paintTop() {
   iconBtn(L.mute, app.muted || m.s.master == 0 ? "i-mute" : "i-vol", hot(H_MUTE));
   slider(L.master, m.s.master);
   iconBtn(L.info, "i-info", hot(H_INFO));
+  iconBtn(L.miniBtn, "i-mini", hot(H_MINI));
   iconBtn(L.keys, "i-keys", hot(H_KEYS));
 }
 
@@ -306,26 +311,30 @@ void Ui::paintStage() {
     }
   }
   paintRing();
-
-  if (visible(L.transport.inset(-3))) {
-    auto round = [&](const R& r, const char* icon, bool big, bool hv, bool disabled) {
-      const float a = disabled ? .35f : 1;
-      const float cx = r.cx(), cy = r.cy(), rad = r.w / 2;
-      if (big) {
-        const Color c = hv ? mixColor(P.accent, rgb(0xffffff), .07f) : P.accent;
-        g.fillCircle(cx, cy, rad, c);
-        g.icon(icon, cx, cy, 26, P.accentInk, true);
-      } else {
-        g.fillCircle(cx, cy, rad, A(P.panel, a));
-        g.strokeCircle(cx, cy, rad - .5f, A(hv ? P.text3 : P.line2, a), 1);
-        g.icon(icon, cx, cy, 20, A(hv ? P.text : P.text2, a));
-      }
-    };
-    round(L.prev, "i-prev", false, hot(H_PREV), false);
-    round(L.play, app.running ? "i-pause" : "i-play", true, hot(H_PLAY), false);
-    round(L.next, "i-next", false, hot(H_NEXT), !(s.cycle && !s.done));
-  }
+  paintTransport();
   paintSpectrum();
+}
+
+void Ui::paintTransport() {
+  if (!visible(L.transport.inset(-3))) return;
+  const Palette& P = g.pal;
+  const SessionSnap s = app.session.snapshot();
+  auto round = [&](const R& r, const char* icon, bool big, bool hv, bool disabled) {
+    const float a = disabled ? .35f : 1;
+    const float cx = r.cx(), cy = r.cy(), rad = r.w / 2;
+    if (big) {
+      const Color c = hv ? mixColor(P.accent, rgb(0xffffff), .07f) : P.accent;
+      g.fillCircle(cx, cy, rad, c);
+      g.icon(icon, cx, cy, r.w < 64 ? 24.f : 26.f, P.accentInk, true);
+    } else {
+      g.fillCircle(cx, cy, rad, A(P.panel, a));
+      g.strokeCircle(cx, cy, rad - .5f, A(hv ? P.text3 : P.line2, a), 1);
+      g.icon(icon, cx, cy, 20, A(hv ? P.text : P.text2, a));
+    }
+  };
+  round(L.prev, "i-prev", false, hot(H_PREV), false);
+  round(L.play, app.running ? "i-pause" : "i-play", true, hot(H_PLAY), false);
+  round(L.next, "i-next", false, hot(H_NEXT), !(s.cycle && !s.done));
 }
 
 void Ui::paintRing() {
@@ -423,7 +432,8 @@ void Ui::paintSpectrum() {
   g.d2d->CreateStrokeStyle(sp, nullptr, 0, js.put());
   g.rt->DrawGeometry(stroke.get(), g.brush(A(P.accent, .95f)), 1.5f, js.get());
 
-  // frequency axis
+  // frequency axis (the compact player has no room for it)
+  if (!mini_) {
   const double span = std::log(Spectrum::FMAX / Spectrum::FMIN);
   auto at = [&](double f) { return s.x + (float)(std::log(f / Spectrum::FMIN) / span) * s.w; };
   for (double f : {50., 100., 200., 500., 1000., 2000., 5000., 10000.}) {
@@ -435,6 +445,7 @@ void Ui::paintSpectrum() {
     TextStyle t = T(10, 400, P.text3, TX_CENTER);
     t.tabular = true;
     g.text(l.t, {at(l.f) - 30, s.b() - 7 - 14, 60, 14}, t);
+  }
   }
   g.popClip();
   spec.markPainted();
@@ -682,7 +693,7 @@ void Ui::paintOverlays() {
 void Ui::paintSheet() {
   const Palette& P = g.pal;
   g.fill({0, 0, W_, H_}, rgb(0x05060a, .6f));
-  const float sw = std::min(440.f, W_ - 32), sh = sheet_ == 1 ? 546.f : 372.f;
+  const float sw = std::min(440.f, W_ - 32), sh = sheet_ == 1 ? SHEET_EVIDENCE_H : SHEET_KEYS_H;
   const R s = {(W_ - sw) / 2, std::max(8.f, (H_ - sh) / 2), sw, sh};
   shadow(s, 14, 1.4f);
   g.fillRound(s, 14, P.panel);
@@ -736,7 +747,7 @@ void Ui::paintSheet() {
     struct Row { std::vector<const wchar_t*> keys; std::vector<const char*> icons; };
     const vector<Row> rows = {
         {{L"Space"}, {"i-play"}}, {{L"←", L"→"}, {"i-prev", "i-next"}}, {{L"↑", L"↓"}, {"i-vol"}}, {{L"M"}, {"i-mute"}},
-        {{L"1", L"–", L"7"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"V"}, {"i-video"}}, {{L"Ctrl", L"V"}, {"i-link"}}};
+        {{L"1", L"–", L"7"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"V"}, {"i-video"}}, {{L"N"}, {"i-mini"}}, {{L"Ctrl", L"V"}, {"i-link"}}};
     float y = s.y + 56 + 8;
     for (const Row& r : rows) {
       float x = s.x + 20;
@@ -758,4 +769,34 @@ void Ui::paintSheet() {
       y += 26 + 12;
     }
   }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The compact player
+// ---------------------------------------------------------------------------------------------------
+
+void Ui::paintMini() {
+  const Palette& P = g.pal;
+  const Model& m = app.model;
+  const auto& stock = stockScenes();
+  paintRing();
+  paintTransport();
+  for (int i = 0; i < 7; i++) {
+    const R r = L.scene[i];
+    if (!visible(r)) continue;
+    const bool cur = m.s.scene == stock[(size_t)i].id, hv = hot(H_SCENE, i);
+    if (cur) {
+      g.fillRound(r, 10, P.raised);
+      g.strokeRound(r, 10, P.line, 1);
+    } else if (hv) {
+      g.fillRound(r, 10, P.hover);
+    }
+    g.icon(stock[(size_t)i].icon.c_str(), r.cx(), r.cy(), 20, cur ? P.accent : (hv ? P.text : P.text2));
+  }
+  if (visible(L.mute.inset(-4, -8))) {
+    iconBtn(L.mute, app.muted || m.s.master == 0 ? "i-mute" : "i-vol", hot(H_MUTE), 18);
+    slider(L.master, m.s.master);
+  }
+  iconBtn(L.miniBtn, "i-expand", hot(H_MINI), 18);
+  paintSpectrum();
 }

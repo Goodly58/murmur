@@ -29,6 +29,8 @@ struct State {
   std::map<string, double> log;     // yyyy-mm-dd -> focus minutes
   int winX = INT32_MIN, winY = INT32_MIN, winW = 0, winH = 0;
   bool maximized = false;
+  bool mini = false;                // the compact always-on-top player
+  int miniX = INT32_MIN, miniY = INT32_MIN;
 };
 
 // A stream spec is a bare 11-character YouTube id, "list:<playlist id>", or "file:<path>".

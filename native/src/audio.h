@@ -33,6 +33,11 @@ class Engine {
   string deviceName() const;
   string lastError() const;
 
+  // Called on a worker thread when the output we were playing on goes away (headphones unplugged, device
+  // disabled). The engine stops by itself first, so nothing blips out of the speakers; the app shows why.
+  std::function<void()> onOutputLost;
+  void simulateOutputLost();  // for tests
+
   void renderBlock(float* out, int frames);        // interleaved stereo
   bool waitSoundsReady(int timeoutMs);             // blocks until every wanted loop exists
   void copyScope(float* dst, int n) const;         // newest n mono samples of the pre-master mix
@@ -70,7 +75,7 @@ class Engine {
   mutable std::mutex noteMu_;
   vector<Note> notes_;  // chimes waiting for the audio thread
   Params p_;
-  std::atomic<bool> playing_{false}, quit_{false}, realDevice_{false};
+  std::atomic<bool> playing_{false}, quit_{false}, realDevice_{false}, lost_{false};
   std::atomic<int> rate_{48000};
   std::atomic<int64_t> lastActive_{0};
   std::thread thread_;

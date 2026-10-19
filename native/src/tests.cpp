@@ -822,6 +822,8 @@ int runSelfTests(const string& only) {
   if (want("app")) testApp(t);
   if (want("resolver")) testResolver(t);
   if (want("ui")) testUi(t);
+  if (want("launch")) testLaunch(t);
+  if (want("mini")) testMini(t);
   if (want("dsp")) testDsp(t);
   if (want("audio")) testAudio(t);
   std::printf("\n%s: %d passed, %d failed\n", t.failed ? "FAILED" : "ALL PASSED", t.passed, t.failed);

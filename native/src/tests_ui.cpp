@@ -366,3 +366,141 @@ void testResolver(TestLog& t) {
   t.check("resolver: ended streams are not offered", !m.count("create") || std::find(m.at("create").begin(), m.at("create").end(), "DWcJFNfaw9c") == m.at("create").end());
   t.check("resolver: scenes with no stream get nothing", !m.count("mask") && !m.count("white"));
 }
+
+// ---------------------------------------------------------------------------------------------------
+// Launch requests, the compact player and losing the sound output.
+// ---------------------------------------------------------------------------------------------------
+
+void testLaunch(TestLog& t) {
+  Launch l = parseLaunch({L"--scene", L"sleep", L"--plan", L"t60", L"--play"});
+  t.check("launch: scene, plan and play are read", l.scene == "sleep" && l.plan == "t60" && l.play && !l.mini);
+  l = parseLaunch({L"--scene=calm", L"--plan=t20", L"--mini"});
+  t.check("launch: the --name=value form works", l.scene == "calm" && l.plan == "t20" && l.mini);
+  l = parseLaunch({L"https://youtu.be/dQw4w9WgXcQ", L"C:/m/a.MP3", L"notes.txt", L"--bogus", L"--full"});
+  t.check("launch: links, audio files and --full are found, the rest is ignored", l.links.size() == 1 && l.files.size() == 1 && l.full && l.scene.empty());
+  l = parseLaunch({L"--scene"});
+  t.check("launch: a flag without a value is harmless", l.scene.empty());
+
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  Rig r;
+  if (!r.init()) { t.check("launch: the rig starts", false); return; }
+  App& app = *r.app;
+  Launch go;
+  go.scene = "sleep";
+  go.plan = "t60";
+  go.play = true;
+  app.applyLaunch(go);
+  t.check("launch: --scene sleep --plan t60 --play starts that session", app.model.s.scene == "sleep" && app.model.planId() == "t60" && app.session.planId() == "t60" && app.running);
+  r.advance(5000);
+  t.check("launch: the session is running", app.session.snapshot().elapsed >= 4000);
+  app.applyLaunch(go);
+  t.check("launch: asking again starts the timer afresh, like picking the plan again", app.session.snapshot().elapsed < 2000 && app.running);
+  app.stopAll();
+  Launch pick;
+  pick.scene = "read";
+  app.applyLaunch(pick);
+  t.check("launch: a scene without --play only selects it", app.model.s.scene == "read" && !app.running);
+  Launch bad;
+  bad.scene = "nope";
+  bad.plan = "zzz";
+  app.applyLaunch(bad);
+  t.check("launch: unknown names change nothing", app.model.s.scene == "read" && app.model.planId() == "p50");
+  Launch link;
+  link.links = {L"https://youtu.be/dQw4w9WgXcQ"};
+  app.applyLaunch(link);
+  t.check("launch: a link pins that stream and starts it", app.model.s.custom == "dQw4w9WgXcQ" && app.running);
+
+  // the sound output goes away
+  int lost = 0;
+  r.eng.onOutputLost = [&] { lost++; app.outputLost(); };
+  r.eng.simulateOutputLost();
+  t.check("output: losing the device stops playback and says why",
+          lost == 1 && !app.running && !r.eng.playing() && app.toast.active() && app.toast.msg.find(L"removed") != wstring::npos);
+  app.toast = Toast();
+  app.outputLost();
+  t.check("output: when nothing was playing there is nothing to say", !app.toast.active());
+
+  // state of the compact player
+  Model m;
+  m.s.mini = true;
+  m.s.miniX = 1200;
+  m.s.miniY = 700;
+  Model back;
+  back.load(m.serialize());
+  t.check("model: the compact player's state is kept", back.s.mini && back.s.miniX == 1200 && back.s.miniY == 700);
+  Model fresh;
+  fresh.load("{}");
+  t.check("model: and defaults to the full window", !fresh.s.mini && fresh.s.miniX == INT32_MIN);
+}
+
+void testMini(TestLog& t) {
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  Rig r;
+  if (!r.init()) { t.check("mini: the rig starts", false); return; }
+  Ui& ui = *r.ui;
+  App& app = *r.app;
+  int toggled = 0;
+  ui.hooks.toggleMini = [&] { toggled++; };
+
+  t.check("mini: the full window has a mini-player button", ui.find(H_MINI).k == H_MINI);
+  r.click(H_MINI);
+  t.check("mini: clicking it asks the window to switch", toggled == 1);
+  ui.key('N', false, false);
+  t.check("mini: so does the N key", toggled == 2);
+
+  ui.setMini(true);
+  ui.setSize(320, 484);
+  t.check("mini: seven scenes, transport, mute, volume and the way back",
+          countKind(ui, H_SCENE) == 7 && countKind(ui, H_PLAY) == 1 && countKind(ui, H_PREV) == 1 && countKind(ui, H_NEXT) == 1 && countKind(ui, H_MUTE) == 1 &&
+              countKind(ui, H_MASTER) == 1 && countKind(ui, H_MINI) == 1);
+  t.check("mini: no mix tiles, bands, plans or presets", countKind(ui, H_TILE) == 0 && countKind(ui, H_BAND) == 0 && countKind(ui, H_PLAN) == 0 && countKind(ui, H_CHIP) == 0);
+  bool inside = true;
+  for (auto& h : ui.hits()) if (h.r.x < 0 || h.r.y < 0 || h.r.r() > 321 || h.r.b() > 485) inside = false;
+  t.check("mini: everything fits the compact window", inside);
+  const Hit play = ui.find(H_PLAY);
+  t.check("mini: the ring and transport sit above the scene row and the spectrum strip",
+          ui.ringRect().b() < play.r.y && play.r.b() < ui.find(H_SCENE, 0).r.y && ui.find(H_SCENE, 0).r.b() < ui.specRect().y && ui.specRect().b() <= 485);
+
+  r.click(H_SCENE, 3);
+  t.check("mini: a scene button starts that scene", app.model.s.scene == "mask" && app.running);
+  r.click(H_PLAY);
+  t.check("mini: the play button pauses", !app.running);
+  {
+    const Hit m = ui.find(H_MASTER);
+    const float x = m.r.x + 7 + (m.r.w - 14) * .25f;
+    ui.mouseMove(x, m.r.cy(), false);
+    ui.mouseDown(x, m.r.cy());
+    ui.mouseUp(x, m.r.cy());
+    t.check("mini: the volume slider works", std::abs(app.model.s.master - 25) <= 2, std::to_string(app.model.s.master));
+    app.setMaster(70);
+  }
+  r.click(H_MINI);
+  t.check("mini: the expand button asks to go back", toggled == 3);
+
+  // drawing
+  app.selectScene("focus");
+  r.advance(1000);
+  r.advance(6 * 60000 + 15000);
+  ui.changed();
+  vector<uint8_t> px;
+  UINT pw = 0, ph = 0;
+  const bool ok = render(r, 1.0f, px, pw, ph);
+  t.check("mini: the compact window renders", ok && pw == 320 && ph == 484);
+  if (ok) {
+    const Palette P = paletteFor(true);
+    auto col = [](Color c) { return Pix{(int)std::lround(c.r * 255), (int)std::lround(c.g * 255), (int)std::lround(c.b * 255)}; };
+    t.check("mini: dark background", closeTo(at(px, pw, 3, 3), col(P.bg), 1), pixStr(at(px, pw, 3, 3)));
+    const Hit pl = ui.find(H_PLAY);
+    t.check("mini: amber play button", closeTo(at(px, pw, (int)(pl.r.cx() - 20), (int)pl.r.cy()), col(P.accent), 3), pixStr(at(px, pw, (int)(pl.r.cx() - 20), (int)pl.r.cy())));
+    const R ring = ui.ringRect();
+    const float rad = ring.w / 2 * (150.f / 160.f);
+    const Pix onArc = at(px, pw, (int)std::lround(ring.cx() + rad), (int)std::lround(ring.cy()));
+    t.check("mini: the progress arc is drawn", closeTo(onArc, col(P.accent), 40), pixStr(onArc));
+    const Hit cur = ui.find(H_SCENE, 0);
+    t.check("mini: the current scene is highlighted", closeTo(at(px, pw, (int)(cur.r.x + 3), (int)cur.r.cy()), col(P.raised), 6), pixStr(at(px, pw, (int)(cur.r.x + 3), (int)cur.r.cy())));
+  }
+
+  ui.setMini(false);
+  ui.setSize(1180, 760);
+  t.check("mini: leaving it brings the full layout back", countKind(ui, H_TILE) == 10 && countKind(ui, H_SCENE) == 7 && ui.find(H_MINI).k == H_MINI);
+}

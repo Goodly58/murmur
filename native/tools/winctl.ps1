@@ -70,6 +70,7 @@ switch ($Cmd) {
   "restore" { if ([W]::IsIconic($h)) { [W]::ShowWindow($h, 9) | Out-Null }; [W]::SetForegroundWindow($h) | Out-Null }
   "edittext" { $e = [W]::FindWindowEx($h, [IntPtr]::Zero, "EDIT", [NullString]::Value); if ($e -eq [IntPtr]::Zero) { Write-Output "no edit" } else { [W]::SendMessageStr($e, 0x000C, [IntPtr]0, $Text) | Out-Null; Start-Sleep -Milliseconds 50; [W]::SendMessage($e, 0x0100, [IntPtr]13, [IntPtr]0) | Out-Null; Write-Output "edit set" } }
   "settext" { $e = [W]::FindWindowEx($h, [IntPtr]::Zero, "EDIT", [NullString]::Value); if ($e -eq [IntPtr]::Zero) { Write-Output "no edit" } else { [W]::SendMessageStr($e, 0x000C, [IntPtr]0, $Text) | Out-Null; Write-Output "text set" } }
+  "command" { [W]::SendMessage($h, 0x0111, [IntPtr](($Delta -shl 16) -bor $Vk), [IntPtr]0) | Out-Null }   # WM_COMMAND: -Vk id, -Delta notification (6144 = taskbar button click)
   "resize" { [W]::SetWindowPos($h, [IntPtr]::Zero, $X2, $Y2, $X, $Y, 0x0014) | Out-Null }   # -X/-Y = outer size, -X2/-Y2 = position
   "close" { [W]::PostMessage($h, 0x0010, [IntPtr]0, [IntPtr]0) | Out-Null }
 }

@@ -10,7 +10,6 @@ TextStyle T(float size, int weight, Color c, int align = TX_LEFT) {
   s.align = align;
   return s;
 }
-constexpr float SHEET_EVIDENCE_H = 546, SHEET_KEYS_H = 372;
 }  // namespace
 
 wstring fmtClock(int64_t ms, bool up) {
@@ -82,6 +81,10 @@ void Ui::build() {
   layoutDirty_ = false;
   hits_.clear();
   L = Layout();
+  if (mini_) {
+    buildMini();
+    return;
+  }
   const float W = W_, H = H_;
   const Model& m = app.model;
   const SessionSnap snap = app.session.snapshot();
@@ -102,6 +105,8 @@ void Ui::build() {
   x = L.keys.x - 14;
   L.info = {x - 32, 12, 32, 32};
   x = L.info.x - 14;
+  L.miniBtn = {x - 32, 12, 32, 32};
+  x = L.miniBtn.x - 14;
   L.master = {x - 112, 18, 112, 20};
   L.mute = {L.master.x - 4 - 32, 12, 32, 32};
   x = L.mute.x - 14;
@@ -275,6 +280,7 @@ void Ui::build() {
   add(H_MUTE, 0, L.mute, L"Mute (M)");
   add(H_MASTER, 0, L.master.inset(0, -4), L"Volume");
   add(H_INFO, 0, L.info, L"Evidence");
+  add(H_MINI, 0, L.miniBtn, L"Mini player (N)");
   add(H_KEYS, 0, L.keys, L"Shortcuts (?)");
 
   // presets: chips are clipped to the scrolling area
@@ -566,6 +572,7 @@ bool Ui::key(int vk, bool ctrl, bool shift) {
     case 'M': app.toggleMute(); return true;
     case 'B': app.cycleBeatsMode(); return true;
     case 'V': app.toggleVideoWindow(); return true;
+    case 'N': if (hooks.toggleMini) hooks.toggleMini(); return true;
     case VK_OEM_2: if (shift) { openSheet(2); return true; } return false;
     default: break;
   }
@@ -630,6 +637,7 @@ void Ui::activate(const Hit& h) {
     case H_MUTE: app.toggleMute(); break;
     case H_INFO: openSheet(1); break;
     case H_KEYS: openSheet(2); break;
+    case H_MINI: if (hooks.toggleMini) hooks.toggleMini(); break;
     case H_CHIP: app.presetLoad(m.s.presets[(size_t)h.i].id); break;
     case H_CHIPX: app.presetDelete(m.s.presets[(size_t)h.i].id); break;
     case H_PADD: {
@@ -671,5 +679,67 @@ void Ui::activate(const Hit& h) {
       break;
     }
     default: break;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The compact player: ring, transport, a row of scenes, volume and a strip of spectrum. It stays on top of
+// other windows (the window layer does that) so the clock is always in sight.
+// ---------------------------------------------------------------------------------------------------
+
+void Ui::setMini(bool on) {
+  if (mini_ == on) return;
+  mini_ = on;
+  sheet_ = 0;
+  linkOpen_ = false;
+  hover_ = Hit();
+  press_ = Hit();
+  clearTip();
+  layoutDirty_ = true;
+  invalidateAll();
+}
+
+void Ui::buildMini() {
+  layoutDirty_ = false;
+  hits_.clear();
+  const float W = W_, H = H_;
+  const SessionSnap snap = app.session.snapshot();
+  const auto& stock = stockScenes();
+  const Palette& P = g.pal;
+
+  const float ringPx = (float)clampd(std::min((double)W - 88, (double)H - 252), 170, 240);
+  L.ringPx = ringPx;
+  L.ring = {(W - ringPx) / 2, 14, ringPx, ringPx};
+  L.miniBtn = {W - 10 - 32, 10, 32, 32};
+  const float playD = 64;
+  const float ty = L.ring.b() + 14 + playD / 2;
+  L.play = {W / 2 - playD / 2, ty - playD / 2, playD, playD};
+  L.prev = {L.play.x - 18 - 40, ty - 20, 40, 40};
+  L.next = {L.play.r() + 18, ty - 20, 40, 40};
+  L.transport = {L.prev.x, L.play.y, L.next.r() - L.prev.x, playD};
+  const float sy = L.play.b() + 16;
+  const float x0 = (W - 288) / 2;
+  for (int i = 0; i < 7; i++) L.scene[i] = {x0 + i * 42, sy, 36, 36};
+  const float vy = sy + 36 + 12;
+  L.mute = {14, vy - 4, 28, 28};
+  L.master = {50, vy, W - 50 - 18, 20};
+  const float specTop = vy + 20 + 12;
+  L.specH = std::max(0.f, H - specTop);
+  L.spec = {0, specTop, W, L.specH};
+
+  add(H_MINI, 0, L.miniBtn, L"Full window (N)");
+  add(H_MUTE, 0, L.mute, L"Mute (M)");
+  add(H_MASTER, 0, L.master.inset(0, -4), L"Volume");
+  for (int i = 0; i < 7; i++) add(H_SCENE, i, L.scene[i], stock[(size_t)i].name + L" (" + std::to_wstring(i + 1) + L")");
+  add(H_PREV, 0, L.prev, L"Restart phase (\u2190)");
+  add(H_PLAY, 0, L.play, L"Play / pause (Space)");
+  if (snap.cycle && !snap.done) add(H_NEXT, 0, L.next, L"Skip phase (\u2192)");
+  if (app.toast.active() && !app.toast.action.empty()) {
+    TextStyle ts = T(13, 400, P.text);
+    TextStyle as = T(13, 600, P.accent);
+    const float tw = g.measure(app.toast.msg, ts), aw = g.measure(app.toast.action, as) + 20;
+    const float w = 16 + tw + 12 + aw + 8, h = 45;
+    const R tr = {(W - w) / 2, H - 24 - h, w, h};
+    add(H_TOASTACT, 0, {tr.r() - 8 - aw, tr.y + 8, aw, 29}, L"");
   }
 }

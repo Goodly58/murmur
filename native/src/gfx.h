@@ -119,5 +119,4 @@ class Gfx {
   std::map<uint32_t, Com<IDWriteTextFormat>> formats_;
   Com<ID2D1SolidColorBrush> brush_;
   Com<ID2D1StrokeStyle> round_, dashed_;
-  ID2D1RenderTarget* brushOwner_ = nullptr;
 };

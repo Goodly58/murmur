@@ -11,6 +11,7 @@ struct IconDef {
 };
 const IconDef ICON_DEFS[] = {
 #include "icons_gen.inc"
+#include "icons_extra.inc"
 };
 }  // namespace
 
@@ -73,11 +74,8 @@ void Gfx::bind(ID2D1RenderTarget* target, float dpi) {
   rt->SetDpi(dpi, dpi);
   rt->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
   rt->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-  if (brushOwner_ != target) {
-    brush_.reset();
-    rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), brush_.put());
-    brushOwner_ = target;
-  }
+  brush_.reset();
+  rt->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), brush_.put());
 }
 
 ID2D1SolidColorBrush* Gfx::brush(Color c) {

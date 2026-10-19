@@ -1,5 +1,7 @@
 #include "install.h"
 
+#include "jumplist.h"
+
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -104,6 +106,7 @@ int installApp(bool quiet) {
     setRegDword(k, L"NoRepair", 1);
     RegCloseKey(k);
   }
+  updateJumpList(target);
   SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
   say(quiet, L"Murmur is installed. Press the Windows key and type \"Murmur\".");
   ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL);
@@ -117,6 +120,7 @@ int uninstallApp(bool quiet) {
     Sleep(800);
   }
   DeleteFileW(shortcutPath().c_str());
+  clearJumpList();
   RegDeleteKeyW(HKEY_CURRENT_USER, UNINSTALL_KEY);
   // the running program cannot delete itself: a hidden shell does it a moment after we exit
   wstring cl = L"cmd.exe /c ping 127.0.0.1 -n 3 >nul & del /f /q \"" + target + L"\" & rmdir \"" + dir + L"\"";

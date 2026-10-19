@@ -162,6 +162,56 @@ void App::nextPhase() {
 
 void App::tick() { session.tick(); }
 
+bool isAudioFile(const wstring& path) {
+  wstring l = path;
+  for (auto& c : l) c = (wchar_t)std::towlower(c);
+  for (const wchar_t* ext : {L".mp3", L".m4a", L".aac", L".wav", L".flac", L".ogg", L".oga", L".opus", L".weba", L".wma", L".mka"}) {
+    const size_t n = wcslen(ext);
+    if (l.size() > n && l.compare(l.size() - n, n, ext) == 0) return true;
+  }
+  return false;
+}
+
+Launch parseLaunch(const vector<wstring>& args) {
+  Launch l;
+  for (size_t i = 0; i < args.size(); i++) {
+    const wstring& a = args[i];
+    if (a.empty()) continue;
+    auto value = [&](const wchar_t* flag) -> string {  // "--scene sleep" or "--scene=sleep"
+      const size_t n = wcslen(flag);
+      if (a == flag) return i + 1 < args.size() ? narrow(args[++i]) : "";
+      if (a.size() > n + 1 && a.compare(0, n, flag) == 0 && a[n] == L'=') return narrow(a.substr(n + 1));
+      return "\x01";
+    };
+    string v;
+    if ((v = value(L"--scene")) != "\x01") { l.scene = v; continue; }
+    if ((v = value(L"--plan")) != "\x01") { l.plan = v; continue; }
+    if (a == L"--play") { l.play = true; continue; }
+    if (a == L"--mini") { l.mini = true; continue; }
+    if (a == L"--full") { l.full = true; continue; }
+    if (a[0] == L'-') continue;
+    if (isAudioFile(a)) l.files.push_back(a);
+    else if (!parseYouTubeLink(narrow(a)).empty()) l.links.push_back(a);
+  }
+  return l;
+}
+
+void App::applyLaunch(const Launch& l) {
+  if (!l.scene.empty() && model.findScene(l.scene) && (l.scene != model.s.scene || (l.play && !running))) {
+    enterScene(l.scene, running ? 1.4 : 0.15, running || l.play);  // while playing, a new scene keeps playing
+  }
+  if (!l.plan.empty()) selectPlan(l.plan);
+  for (const wstring& link : l.links) pasteText(link);
+  if (!l.files.empty()) addFiles(l.files);
+  if (l.play && !running) startAll();
+}
+
+void App::outputLost() {
+  if (!running) return;
+  stopAll();
+  showToast(L"Paused: the sound output was removed", L"", nullptr, 8000);
+}
+
 // Plan finished: fade everything out over four seconds, then stop.
 void App::finish() {
   closing = true;
@@ -509,14 +559,7 @@ void App::pasteText(const wstring& text) {
 
 void App::addFiles(const vector<wstring>& paths) {
   vector<wstring> ok;
-  for (auto& p : paths) {
-    wstring l = p;
-    for (auto& c : l) c = (wchar_t)std::towlower(c);
-    for (const wchar_t* ext : {L".mp3", L".m4a", L".aac", L".wav", L".flac", L".ogg", L".oga", L".opus", L".weba", L".wma", L".mka"}) {
-      const size_t n = wcslen(ext);
-      if (l.size() > n && l.compare(l.size() - n, n, ext) == 0) { ok.push_back(p); break; }
-    }
-  }
+  for (auto& p : paths) if (isAudioFile(p)) ok.push_back(p);
   if (ok.empty()) { showToast(L"No audio files in that drop"); return; }
   files.insert(files.end(), ok.begin(), ok.end());
   model.s.tab = "files";

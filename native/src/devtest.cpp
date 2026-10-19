@@ -167,6 +167,32 @@ int runLoopback(int seconds) {
   return 0;
 }
 
+// `Murmur.exe --lost-test`: plays a very quiet mix on the real output, then pretends the output was unplugged and
+// checks that the engine stops by itself and reports it (the same path a real unplug takes).
+int runLostTest() {
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  Engine e;
+  std::atomic<int> lost{0};
+  e.onOutputLost = [&] { lost++; };
+  e.start(true);
+  Mix m = emptyMix();
+  m[(size_t)channelIndex("brown")] = 30;
+  e.setMaster(0.05);
+  e.setMix(m, BeatSpec{0, 10, 0}, 0.1);
+  e.play();
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  const bool playingBefore = e.playing();
+  e.simulateOutputLost();
+  for (int i = 0; i < 40 && lost.load() == 0; i++) std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));
+  const bool stopped = !e.playing();
+  std::printf("lost test: playing before %d, callbacks %d, playing after %d\n", (int)playingBefore, lost.load(), (int)!stopped);
+  const bool ok = playingBefore && lost.load() == 1 && stopped;
+  e.shutdown();
+  std::printf("%s\n", ok ? "OUTPUT-LOST OK: the engine stopped and reported it" : "OUTPUT-LOST TEST FAILED");
+  return ok ? 0 : 1;
+}
+
 int runDeviceTest(int seconds) {
   CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   Capture cap;

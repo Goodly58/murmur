@@ -16,6 +16,16 @@ struct Toast {
   bool active() const { return until != 0; }
 };
 
+// What a launch asks for: `--scene sleep --plan t60 --play`, `--mini`, a YouTube link, audio files. The same
+// words come from the command line, the jump list and a second launch handing over to the open window.
+struct Launch {
+  string scene, plan;
+  bool play = false, mini = false, full = false;
+  vector<wstring> files, links;
+};
+Launch parseLaunch(const vector<wstring>& args);
+bool isAudioFile(const wstring& path);
+
 class App {
  public:
   App(Engine& engine, Stream& stream);
@@ -54,6 +64,8 @@ class App {
   void prevPhase();
   void nextPhase();
   void tick();                      // once a second
+  void outputLost();                // the sound device went away: stop, and say why
+  void applyLaunch(const Launch& l);  // scene, plan, links and files from a launch (mini/full are the window's)
   bool closeTick(int64_t nowMs);    // while a finished plan fades out; true when it is over
   int64_t msUntilTick() const { return session.msUntilNextTick(); }
 
