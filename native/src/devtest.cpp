@@ -1,12 +1,20 @@
 // `Murmur.exe --device-test [seconds]`: plays a quiet mix through the real default output, records it
 // back with a WASAPI loopback capture, and reports what the process cost (CPU time, memory).
 #include <audioclient.h>
+#include <audiopolicy.h>
+#include <endpointvolume.h>
 #include <mmdeviceapi.h>
 #include <psapi.h>
 
 #include "audio.h"
 #include "common.h"
 #include "tests.h"
+
+// MinGW only forward-declares IAudioMeterInformation, so the one method needed is declared here.
+struct IMeterX : public IUnknown {
+  virtual HRESULT STDMETHODCALLTYPE GetPeakValue(float* peak) = 0;
+};
+static const GUID IID_IMeterX = {0xC02216F6, 0x8C67, 0x4B5B, {0x9D, 0x00, 0xD0, 0x08, 0xE7, 0x3E, 0x00, 0x64}};
 
 namespace {
 
@@ -83,6 +91,81 @@ double cpuSeconds() {
 }
 
 }  // namespace
+
+// `Murmur.exe --session-peaks [seconds]`: which programs are making sound right now (peak level per audio session).
+int runSessionPeaks(int seconds) {
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  IMMDeviceEnumerator* en = nullptr;
+  IMMDevice* dev = nullptr;
+  IAudioSessionManager2* mgr = nullptr;
+  if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&en)) ||
+      FAILED(en->GetDefaultAudioEndpoint(eRender, eMultimedia, &dev)) ||
+      FAILED(dev->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, (void**)&mgr))) {
+    std::printf("cannot open the audio session list\n");
+    return 1;
+  }
+  std::map<DWORD, float> peaks;
+  for (int s = 0; s < seconds * 10; s++) {
+    IAudioSessionEnumerator* list = nullptr;
+    if (SUCCEEDED(mgr->GetSessionEnumerator(&list))) {
+      int n = 0;
+      list->GetCount(&n);
+      for (int i = 0; i < n; i++) {
+        IAudioSessionControl* ctl = nullptr;
+        if (FAILED(list->GetSession(i, &ctl))) continue;
+        IAudioSessionControl2* c2 = nullptr;
+        IMeterX* meter = nullptr;
+        if (SUCCEEDED(ctl->QueryInterface(__uuidof(IAudioSessionControl2), (void**)&c2)) && SUCCEEDED(ctl->QueryInterface(IID_IMeterX, (void**)&meter))) {
+          DWORD pid = 0;
+          c2->GetProcessId(&pid);
+          float peak = 0;
+          meter->GetPeakValue(&peak);
+          peaks[pid] = std::max(peaks[pid], peak);
+        }
+        if (meter) meter->Release();
+        if (c2) c2->Release();
+        ctl->Release();
+      }
+      list->Release();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  for (auto& kv : peaks) {
+    wchar_t name[MAX_PATH] = L"(system)";
+    if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, kv.first)) {
+      DWORD n = MAX_PATH;
+      wchar_t full[MAX_PATH];
+      if (QueryFullProcessImageNameW(p, 0, full, &n)) {
+        const wchar_t* base = wcsrchr(full, L'\\');
+        wcsncpy(name, base ? base + 1 : full, MAX_PATH - 1);
+      }
+      CloseHandle(p);
+    }
+    std::printf("  pid %5lu  %-24ls peak %.4f\n", (unsigned long)kv.first, name, kv.second);
+  }
+  mgr->Release();
+  dev->Release();
+  en->Release();
+  return 0;
+}
+
+// `Murmur.exe --loopback [seconds]`: prints the level of whatever is playing on the default output, once a second.
+// Handy for checking that the real window really makes sound.
+int runLoopback(int seconds) {
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  Capture cap;
+  std::thread capThread([&] { cap.run(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
+  for (int i = 0; i < seconds; i++) {
+    const size_t a = cap.size();
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::printf("  second %d: output level %.5f\n", i + 1, cap.rmsBetween(a, cap.size()));
+  }
+  if (!cap.error.empty()) std::printf("  capture error: %s\n", cap.error.c_str());
+  cap.stop = true;
+  capThread.join();
+  return 0;
+}
 
 int runDeviceTest(int seconds) {
   CoInitializeEx(nullptr, COINIT_MULTITHREADED);

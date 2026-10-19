@@ -18,7 +18,7 @@ void attachParentConsole() {
 }
 
 bool isCliFlag(const wstring& a) {
-  return a == L"--selftest" || a == L"--snapshot" || a == L"--device-test" || a == L"--make-icon" || a == L"--install" || a == L"--uninstall";
+  return a == L"--selftest" || a == L"--snapshot" || a == L"--device-test" || a == L"--loopback" || a == L"--session-peaks" || a == L"--make-icon" || a == L"--install" || a == L"--uninstall";
 }
 
 bool hasFlag(const vector<wstring>& args, const wchar_t* f) {
@@ -35,6 +35,8 @@ int dispatch(const vector<wstring>& args, HINSTANCE inst, int show) {
       return runSelfTests(only);
     }
     if (a == L"--device-test") return runDeviceTest(i + 1 < args.size() ? _wtoi(args[i + 1].c_str()) : 6);
+    if (a == L"--session-peaks") return runSessionPeaks(i + 1 < args.size() ? _wtoi(args[i + 1].c_str()) : 3);
+    if (a == L"--loopback") return runLoopback(i + 1 < args.size() ? _wtoi(args[i + 1].c_str()) : 5);
     if (a == L"--snapshot") {
       vector<wstring> copy = args;
       copy.insert(copy.begin(), L"murmur");

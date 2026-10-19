@@ -13,3 +13,5 @@ void testResolver(TestLog& t);
 
 int runSelfTests(const string& only = "");
 int runDeviceTest(int seconds);
+int runLoopback(int seconds);
+int runSessionPeaks(int seconds);

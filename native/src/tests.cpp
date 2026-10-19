@@ -228,23 +228,36 @@ void testAudio(TestLog& t) {
     t.check("audio: ears differ", std::fabs(rmsOf(o.l.data(), o.l.size()) - rmsOf(o.r.data(), o.r.size())) < 0.02 && o.l != o.r);
     t.check("audio: loops are held in memory", e.loopBytes() > 1000000, fmt("%.1f MB", e.loopBytes() / 1048576.0));
 
-    // balance with the stream
-    e.setSoundMul(0.5);
-    Rendered half = pull(e, 1.5);
-    t.check("audio: balance halves the sounds", std::fabs(tailRms(half.l, 0.5, SR) / rms - 0.5) < 0.1, fmt("%.3f", tailRms(half.l, 0.5, SR) / rms));
-    e.setSoundMul(1.0);
+    // Level ratios are measured on one sound over a whole loop period (brown loops every 14 s), where the RMS
+    // does not depend on where the window starts, so the noise itself cannot skew the result.
+    {
+      Mix mb = emptyMix();
+      mb[(size_t)channelIndex("brown")] = 45;
+      e.setMix(mb, BeatSpec{0, 10, 0}, 0.01);
+      e.waitSoundsReady(5000);
+      pull(e, 2.0);  // the pink part fades out
+      const double period = 14.0;
+      auto level = [&](double settle) { Rendered r = pull(e, settle + period); return tailRms(r.l, period, SR); };
+      const double ref = level(0.5);
 
-    // fade (sleep timer): master follows
-    e.setFade(0.25);
-    Rendered fd = pull(e, 2.0);
-    t.check("audio: fade scales the master", std::fabs(tailRms(fd.l, 0.5, SR) / rms - 0.25) < 0.06, fmt("%.3f", tailRms(fd.l, 0.5, SR) / rms));
-    e.setFade(1.0);
+      e.setSoundMul(0.5);  // balance with the stream
+      const double bal = level(2.0) / ref;
+      t.check("audio: balance halves the sounds", std::fabs(bal - 0.5) < 0.04, fmt("%.3f", bal));
+      e.setSoundMul(1.0);
 
-    // master volume curve is x^1.5
-    e.setMaster(0.5);
-    Rendered mv = pull(e, 2.5);
-    t.check("audio: master volume uses the 1.5 power curve", std::fabs(tailRms(mv.l, 1.0, SR) / rms - std::pow(0.5, 1.5)) < 0.08, fmt("%.3f", tailRms(mv.l, 1.0, SR) / rms));
-    e.setMaster(1.0);
+      e.setFade(0.25);  // fade (sleep timer): master follows
+      const double fd = level(2.0) / ref;
+      t.check("audio: fade scales the master", std::fabs(fd - 0.25) < 0.03, fmt("%.3f", fd));
+      e.setFade(1.0);
+
+      e.setMaster(0.5);  // master volume curve is x^1.5
+      const double mv = level(2.0) / ref;
+      t.check("audio: master volume uses the 1.5 power curve", std::fabs(mv - std::pow(0.5, 1.5)) < 0.04, fmt("%.3f", mv));
+      e.setMaster(1.0);
+
+      e.setMix(m, BeatSpec{0, 10, 0}, 0.01);  // back to the focus mix for the checks below
+      pull(e, 2.0);
+    }
 
     // scope tap sees the pre-master mix
     vector<float> sc(4096);

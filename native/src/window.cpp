@@ -504,13 +504,15 @@ void MainWindow::onAppChange() {
 
 void MainWindow::onAppTick() {
   ui->changed();
-  invalidateDip(ui->ringRect().inset(-10));
-  const int minute = (int)std::floor(app->model.todayMinutes());
-  if (minute != lastMinute) {
-    lastMinute = minute;
-    invalidateDip(ui->statsRect());
+  if (!minimized) {
+    invalidateDip(ui->ringRect().inset(-10));
+    const int minute = (int)std::floor(app->model.todayMinutes());
+    if (minute != lastMinute) {
+      lastMinute = minute;
+      invalidateDip(ui->statsRect());
+    }
   }
-  updateChrome();
+  updateChrome();  // the title and taskbar progress show the clock while minimized
 }
 
 void MainWindow::updateChrome() {
