@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Murmur</title>
+<meta name="description" content="Focus sound mixer. Noise, nature and beats that blend with a live stream.">
+<meta name="theme-color" content="#0c0e11" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f2ee" media="(prefers-color-scheme: light)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<svg class="sprite" width="0" height="0" aria-hidden="true" focusable="false">
+  <!-- scenes -->
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.2"/><circle cx="12" cy="12" r=".9" fill="currentColor"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6.6C10 5 7 4.6 3.8 5.2v12.6c3.2-.6 6.2-.2 8.2 1.4 2-1.6 5-2 8.2-1.4V5.2C17 4.6 14 5 12 6.6ZM12 6.6v12.6"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9.2 17.6h5.6M10 20.5h4M12 3.5a5.8 5.8 0 0 0-3.4 10.5c.6.5 1 1.1 1 1.8v.2h4.8v-.2c0-.7.4-1.3 1-1.8A5.8 5.8 0 0 0 12 3.5Z"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.2 5 6v5.6c0 4 2.8 7.3 7 9.2 4.2-1.9 7-5.2 7-9.2V6l-7-2.8ZM8.6 12.2c1-1.5 2-1.5 3 0s2 1.5 3 0"/></symbol>
+  <symbol id="i-bars" viewBox="0 0 24 24"><path d="M4.5 10v4M8 7v10M11.5 4.5v15M15 8v8M18.5 6v12"/></symbol>
+  <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M5 19c0-9 5-14 14.5-14.5C19 14 14 19 5 19ZM5 19l8-8"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1Z"/></symbol>
+  <!-- sounds -->
+  <symbol id="i-brown" viewBox="0 0 24 24"><path d="M2.5 12c3-8.5 6-8.5 9 0s6 8.5 9 0"/></symbol>
+  <symbol id="i-pink" viewBox="0 0 24 24"><path d="M2.5 12c1.5-5.5 3-5.5 4.5 0s3 5.5 4.5 0 3-5.5 4.5 0 3 5.5 4.5 0"/></symbol>
+  <symbol id="i-white" viewBox="0 0 24 24"><path d="m2.5 12 1.4-4 1.4 7 1.4-9 1.4 10 1.4-8 1.4 6 1.4-9 1.4 8 1.4-6 1.4 5 1.4-4"/></symbol>
+  <symbol id="i-bubble" viewBox="0 0 24 24"><path d="M4.5 5.5h15v10h-7.2L8 19v-3.5H4.5v-10ZM8.5 9.5h7M8.5 12h4"/></symbol>
+  <symbol id="i-rain" viewBox="0 0 24 24"><path d="M7.5 14.5a3.8 3.8 0 0 1-.6-7.5 5.2 5.2 0 0 1 10 1.4 3.1 3.1 0 0 1 .1 6.1H7.5ZM9 17.5l-1 2.5M13 17.5l-1 2.5M17 17.5l-1 2.5"/></symbol>
+  <symbol id="i-ocean" viewBox="0 0 24 24"><path d="M2.5 9.5c2.4-3 4.8-3 7.2 0s4.8 3 7.2 0c1.6-2 3-2.6 4.6-2.2M2.5 15.5c2.4-3 4.8-3 7.2 0s4.8 3 7.2 0c1.6-2 3-2.6 4.6-2.2"/></symbol>
+  <symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 8.5h9.5a2.6 2.6 0 1 0-2.6-2.6M3 12.5h14.2a2.8 2.8 0 1 1-2.8 2.8M3 16.5h6"/></symbol>
+  <symbol id="i-fire" viewBox="0 0 24 24"><path d="M12 3.2c.9 3.4 4.6 5.4 4.6 9.8a4.6 4.6 0 0 1-9.2 0c0-1.9.9-3.4 2-4.5.3 1.2 1 2 1.9 2.4C11.1 8.6 10.9 5.8 12 3.2Z"/></symbol>
+  <symbol id="i-cabin" viewBox="0 0 24 24"><rect x="2.5" y="7.5" width="19" height="9" rx="4.5"/><circle cx="7.5" cy="12" r=".8" fill="currentColor"/><circle cx="12" cy="12" r=".8" fill="currentColor"/><circle cx="16.5" cy="12" r=".8" fill="currentColor"/></symbol>
+  <!-- interface -->
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5.2v13.6L19.2 12 8 5.2Z"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6.5" y="5" width="4" height="14" rx="1.2"/><rect x="13.5" y="5" width="4" height="14" rx="1.2"/></symbol>
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="M7 5.5v13M18 6l-8.5 6 8.5 6V6Z"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="M17 5.5v13M6 6l8.5 6L6 18V6Z"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5l4.5 3.5V6L7.5 9.5H4ZM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9.5v5h3.5l4.5 3.5V6L7.5 9.5H4ZM16 9.5l5 5M21 9.5l-5 5"/></symbol>
+  <symbol id="i-phones" viewBox="0 0 24 24"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3.5" y="14" width="4" height="6.5" rx="1.5"/><rect x="16.5" y="14" width="4" height="6.5" rx="1.5"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 24 24"><rect x="6" y="3.5" width="12" height="17" rx="2.5"/><circle cx="12" cy="14.5" r="3"/><circle cx="12" cy="7.5" r=".9" fill="currentColor"/></symbol>
+  <symbol id="i-off" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 17.5l11-11"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4.5h5.5V10M10 19.5H4.5V14M19.5 4.5l-6 6M4.5 19.5l6-6"/></symbol>
+  <symbol id="i-shrink" viewBox="0 0 24 24"><path d="M19.5 10H14V4.5M4.5 14H10v5.5M14 10l5.5-5.5M10 14l-5.5 5.5"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 7.9v.1"/></symbol>
+  <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="19" height="11" rx="2.5"/><path d="M6.5 10h.1M10 10h.1M13.5 10h.1M17 10h.1M7.5 14h9"/></symbol>
+  <symbol id="i-video" viewBox="0 0 24 24"><rect x="3" y="5.5" width="18" height="13" rx="2.5"/><path d="M10.5 9.5v5l4-2.5-4-2.5Z"/></symbol>
+  <symbol id="i-note" viewBox="0 0 24 24"><path d="M9 17.5V6l10-2v11.5M9 17.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0ZM19 15.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0Z"/></symbol>
+  <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4.5 11.5a7.5 7.5 0 1 1 2.2 5.3M4.5 5.5v6h6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 3 19.5h18L12 4ZM12 10v4.5M12 17v.1"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></symbol>
+</svg>
+
+<div class="app" id="app">
+
+  <header class="top">
+    <div class="brand">
+      <svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10.25"/><path d="M6 12.2h2.1l1.7-4.4 3 8.2 2.1-6 1 2.2H18"/></svg>
+      <span>Murmur</span>
+    </div>
+    <div class="top-r">
+      <div class="seg icons" id="beatsMode" role="radiogroup" aria-label="Beats">
+        <button type="button" role="radio" data-mode="off" title="Beats off (B)"><svg class="ic"><use href="#i-off"/></svg></button>
+        <button type="button" role="radio" data-mode="binaural" title="Binaural beats: headphones (B)"><svg class="ic"><use href="#i-phones"/></svg></button>
+        <button type="button" role="radio" data-mode="isochronic" title="Isochronic beats: speakers (B)"><svg class="ic"><use href="#i-speaker"/></svg></button>
+      </div>
+      <div class="vol">
+        <button type="button" class="icon-btn" id="mute" title="Mute (M)"><svg class="ic"><use href="#i-vol"/></svg></button>
+        <input id="master" type="range" min="0" max="100" aria-label="Volume">
+      </div>
+      <button type="button" class="icon-btn" id="btnInstall" title="Install as app" hidden><svg class="ic"><use href="#i-download"/></svg></button>
+      <button type="button" class="icon-btn" id="btnScience" title="Evidence"><svg class="ic"><use href="#i-info"/></svg></button>
+      <button type="button" class="icon-btn" id="btnKeys" title="Shortcuts (?)"><svg class="ic"><use href="#i-keys"/></svg></button>
+    </div>
+  </header>
+
+  <nav class="rail" aria-label="Scenes">
+    <div class="scenes" id="scenes"></div>
+    <div class="stats" id="stats" title="Focus time">
+      <div class="stats-t"><b id="statToday">0m</b><span>today</span></div>
+      <div class="stats-bars" id="statBars"></div>
+    </div>
+  </nav>
+
+  <main class="stage" id="stage">
+    <div class="stage-core">
+      <div class="seg" id="plans" role="radiogroup" aria-label="Plan"></div>
+      <div class="ring" id="ring">
+        <svg class="ring-svg" viewBox="0 0 320 320" aria-hidden="true">
+          <circle class="ring-track" cx="160" cy="160" r="150"/>
+          <circle class="ring-prog" id="ringProg" cx="160" cy="160" r="150" transform="rotate(-90 160 160)"/>
+          <g id="ticks"></g>
+        </svg>
+        <div class="ring-c">
+          <svg class="ic done-ic" aria-hidden="true"><use href="#i-check"/></svg>
+          <div class="time" id="time">25:00</div>
+          <div class="phase" id="phase">Focus</div>
+          <div class="dots" id="dots"></div>
+        </div>
+      </div>
+      <div class="transport">
+        <button type="button" class="round sm" id="prev" title="Restart phase (&larr;)"><svg class="ic"><use href="#i-prev"/></svg></button>
+        <button type="button" class="round lg" id="play" title="Play / pause (Space)" aria-pressed="false">
+          <svg class="ic solid i-play"><use href="#i-play"/></svg>
+          <svg class="ic solid i-pause"><use href="#i-pause"/></svg>
+        </button>
+        <button type="button" class="round sm" id="next" title="Skip phase (&rarr;)"><svg class="ic"><use href="#i-next"/></svg></button>
+      </div>
+    </div>
+    <div class="spectrum" aria-hidden="true">
+      <canvas id="spectrum"></canvas>
+      <div class="axis" id="axis"></div>
+    </div>
+  </main>
+
+  <aside class="side">
+    <section class="media" id="media">
+      <div class="panel-h">
+        <div class="seg icons" id="mediaTabs" role="tablist" aria-label="Source">
+          <button type="button" role="tab" data-tab="video" title="Video"><svg class="ic"><use href="#i-video"/></svg></button>
+          <button type="button" role="tab" data-tab="files" title="Your music"><svg class="ic"><use href="#i-note"/></svg></button>
+        </div>
+        <div class="grow"></div>
+        <button type="button" class="icon-btn" id="vLink" title="Paste a YouTube link (Ctrl+V)"><svg class="ic"><use href="#i-link"/></svg></button>
+        <button type="button" class="icon-btn" id="vWide" title="Wider"><svg class="ic"><use href="#i-expand"/></svg></button>
+        <button type="button" class="icon-btn" id="vPower" title="Video on / off (V)" aria-pressed="true"><svg class="ic"><use href="#i-video"/></svg></button>
+      </div>
+
+      <div class="pane" id="paneVideo">
+        <div class="player" id="player" data-state="idle">
+          <div class="player-host" id="ytHost"></div>
+          <button type="button" class="poster" id="poster" aria-label="Play">
+            <img id="posterImg" alt="" referrerpolicy="no-referrer">
+            <span class="poster-play"><svg class="ic solid"><use href="#i-play"/></svg></span>
+          </button>
+          <div class="vstate" aria-hidden="true"><span class="spin"></span><svg class="ic alert"><use href="#i-alert"/></svg><svg class="ic idle"><use href="#i-video"/></svg></div>
+        </div>
+        <div class="vbar">
+          <button type="button" class="icon-btn" id="vPrev" title="Previous stream"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <span class="vtitle" id="vTitle"></span>
+          <button type="button" class="icon-btn" id="vNext" title="Next stream"><svg class="ic"><use href="#i-next"/></svg></button>
+          <button type="button" class="icon-btn" id="vClear" title="Back to the scene's stream" hidden><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+        <form class="linkform" id="linkForm" hidden>
+          <input id="linkInput" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="youtube.com/watch?v=" aria-label="YouTube link">
+          <button type="submit" class="icon-btn" title="Load"><svg class="ic"><use href="#i-check"/></svg></button>
+        </form>
+      </div>
+
+      <div class="pane" id="paneFiles" hidden>
+        <button type="button" class="dropzone" id="filePick"><svg class="ic"><use href="#i-note"/></svg><span>Drop audio</span></button>
+        <input id="fileInput" type="file" accept="audio/*" multiple hidden>
+        <ol class="tracks" id="tracks"></ol>
+        <div class="vbar" id="fBar" hidden>
+          <button type="button" class="icon-btn" id="fPrev" title="Previous"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <span class="vtitle" id="fNow"></span>
+          <button type="button" class="icon-btn" id="fNext" title="Next"><svg class="ic"><use href="#i-next"/></svg></button>
+          <button type="button" class="icon-btn" id="fClear" title="Clear"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
+      <div class="blend" title="Video / music  &harr;  sounds">
+        <svg class="ic"><use href="#i-video"/></svg>
+        <input id="blend" type="range" min="0" max="100" aria-label="Balance between video or music and sounds">
+        <svg class="ic"><use href="#i-pink"/></svg>
+      </div>
+    </section>
+
+    <section class="mix" id="mix">
+      <div class="panel-h">
+        <span class="lbl">Mix</span>
+        <div class="grow"></div>
+        <button type="button" class="icon-btn" id="mixReset" title="Reset mix" hidden><svg class="ic"><use href="#i-reset"/></svg></button>
+      </div>
+      <div class="tiles" id="tiles"></div>
+      <div class="bands" id="bands" role="radiogroup" aria-label="Beat band"></div>
+    </section>
+  </aside>
+</div>
+
+<div class="drop" id="drop" aria-hidden="true"><svg class="ic"><use href="#i-note"/></svg></div>
+
+<dialog id="sheetScience" class="sheet" aria-label="Evidence">
+  <header><h2>Evidence</h2><button type="button" class="icon-btn" data-close title="Close"><svg class="ic"><use href="#i-x"/></svg></button></header>
+  <ul class="ev">
+    <li>
+      <svg class="ic"><use href="#i-white"/></svg>
+      <div class="ev-b">
+        <div class="ev-t">Noise</div>
+        <div class="dv-row"><span>ADHD</span><div class="dv"><i class="pos" style="--g:.249"></i></div><b>+0.25</b></div>
+        <div class="dv-row"><span>Others</span><div class="dv"><i class="neg" style="--g:.212"></i></div><b>&minus;0.21</b></div>
+      </div>
+      <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC11283987/" target="_blank" rel="noopener" title="Nigg et al. 2024"><svg class="ic"><use href="#i-link"/></svg></a>
+    </li>
+    <li>
+      <svg class="ic"><use href="#i-vol"/></svg>
+      <div class="ev-b">
+        <div class="ev-t">Volume</div>
+        <div class="tags"><span class="tag">50 dB</span><span class="tag ok">70 dB</span><span class="tag bad">85 dB</span></div>
+      </div>
+      <a href="https://academic.oup.com/jcr/article/39/4/784/1795620" target="_blank" rel="noopener" title="Mehta et al. 2012"><svg class="ic"><use href="#i-link"/></svg></a>
+    </li>
+    <li>
+      <svg class="ic"><use href="#i-bubble"/></svg>
+      <div class="ev-b">
+        <div class="ev-t">Lyrics</div>
+        <div class="tags"><span class="tag ok">Instrumental</span><span class="tag bad">Words</span></div>
+      </div>
+      <a href="https://staffprofiles.bournemouth.ac.uk/display/journal-article/296432" target="_blank" rel="noopener" title="Vasilev et al. 2018"><svg class="ic"><use href="#i-link"/></svg></a>
+    </li>
+    <li>
+      <svg class="ic"><use href="#i-phones"/></svg>
+      <div class="ev-b">
+        <div class="ev-t">Beats</div>
+        <div class="dv-row"><span>Pooled</span><div class="dv"><i class="pos" style="--g:.45"></i></div><b>+0.45</b></div>
+        <div class="tags"><span class="tag">Mixed</span></div>
+      </div>
+      <a href="https://pubmed.ncbi.nlm.nih.gov/30073406/" target="_blank" rel="noopener" title="Garcia-Argibay et al. 2019"><svg class="ic"><use href="#i-link"/></svg></a>
+    </li>
+    <li>
+      <svg class="ic"><use href="#i-off"/></svg>
+      <div class="ev-b">
+        <div class="ev-t">432 Hz &middot; solfeggio</div>
+        <div class="tags"><span class="tag bad">No evidence</span></div>
+      </div>
+      <span></span>
+    </li>
+  </ul>
+  <p class="foot">Hedges&rsquo; g, lab studies</p>
+</dialog>
+
+<dialog id="sheetKeys" class="sheet" aria-label="Shortcuts">
+  <header><h2>Keys</h2><button type="button" class="icon-btn" data-close title="Close"><svg class="ic"><use href="#i-x"/></svg></button></header>
+  <dl class="keys">
+    <dt><kbd>Space</kbd></dt><dd><svg class="ic solid"><use href="#i-play"/></svg></dd>
+    <dt><kbd>&larr;</kbd><kbd>&rarr;</kbd></dt><dd><svg class="ic"><use href="#i-prev"/></svg><svg class="ic"><use href="#i-next"/></svg></dd>
+    <dt><kbd>&uarr;</kbd><kbd>&darr;</kbd></dt><dd><svg class="ic"><use href="#i-vol"/></svg></dd>
+    <dt><kbd>M</kbd></dt><dd><svg class="ic"><use href="#i-mute"/></svg></dd>
+    <dt><kbd>1</kbd>&ndash;<kbd>7</kbd></dt><dd><svg class="ic"><use href="#i-target"/></svg></dd>
+    <dt><kbd>B</kbd></dt><dd><svg class="ic"><use href="#i-phones"/></svg></dd>
+    <dt><kbd>V</kbd></dt><dd><svg class="ic"><use href="#i-video"/></svg></dd>
+    <dt><kbd>Ctrl</kbd><kbd>V</kbd></dt><dd><svg class="ic"><use href="#i-link"/></svg></dd>
+  </dl>
+</dialog>
+
+<script src="dsp.js"></script>
+<script type="module" src="ui.js"></script>
+</body>
+</html>
