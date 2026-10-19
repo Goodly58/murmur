@@ -184,7 +184,10 @@ class MainWindow {
   void endEdit(bool ok);
   int popup(float x, float y, const vector<wstring>& items);
   void invalidateDip(const R& r);
-  float s() const { return dpi / 96.f; }
+  float zoom = 1;                           // the UI grows with the window once it is bigger than the layout needs
+  float eff() const { return dpi * zoom; }  // pixels per 96 DIPs, zoom included
+  float s() const { return eff() / 96.f; }
+  void fit(int pxW, int pxH);               // recomputes the zoom and the UI's size from the client size
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -422,13 +425,13 @@ void MainWindow::onPaint() {
   const bool had = (bool)rt;
   createTarget();
   if (rt) {
-    const float k = 96.f / dpi;
+    const float k = 96.f / eff();
     RECT rc;
     GetClientRect(hwnd, &rc);
     R dirty = {ps.rcPaint.left * k, ps.rcPaint.top * k, (ps.rcPaint.right - ps.rcPaint.left) * k, (ps.rcPaint.bottom - ps.rcPaint.top) * k};
     if (!had) dirty = {0, 0, (rc.right - rc.left) * k, (rc.bottom - rc.top) * k};  // a fresh target starts empty
     rt->BeginDraw();
-    ui->paint(rt.get(), dpi, dirty);
+    ui->paint(rt.get(), eff(), dirty);
     const HRESULT hr = rt->EndDraw();
     if (hr == D2DERR_RECREATE_TARGET) {
       rt.reset();
@@ -441,8 +444,15 @@ void MainWindow::onPaint() {
 void MainWindow::onSize(int w, int h) {
   if (w <= 0 || h <= 0) return;
   if (rt) rt->Resize(D2D1::SizeU((UINT)w, (UINT)h));
-  ui->setSize(w * 96.f / dpi, h * 96.f / dpi);
+  fit(w, h);
   InvalidateRect(hwnd, nullptr, FALSE);
+}
+
+void MainWindow::fit(int w, int h) {
+  const float wd = w * 96.f / dpi, hd = h * 96.f / dpi;
+  const double z = std::min(wd / 1280.0, hd / 820.0);
+  zoom = (float)(std::round(clampd(z, 1.0, 1.75) * 20.0) / 20.0);  // steps of 5%
+  ui->setSize(w * 96.f / eff(), h * 96.f / eff());
 }
 
 void MainWindow::onDpi(UINT newDpi, const RECT* r) {
@@ -450,7 +460,7 @@ void MainWindow::onDpi(UINT newDpi, const RECT* r) {
   if (r) SetWindowPos(hwnd, nullptr, r->left, r->top, r->right - r->left, r->bottom - r->top, SWP_NOZORDER | SWP_NOACTIVATE);
   RECT rc;
   GetClientRect(hwnd, &rc);
-  ui->setSize((rc.right - rc.left) * 96.f / dpi, (rc.bottom - rc.top) * 96.f / dpi);
+  fit(rc.right - rc.left, rc.bottom - rc.top);
   InvalidateRect(hwnd, nullptr, FALSE);
 }
 
@@ -718,7 +728,7 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
     updateChrome();
     return 0;
   }
-  const float k = 96.f / dpi;
+  const float k = 96.f / eff();
   switch (m) {
     case WM_PAINT: onPaint(); return 0;
     case WM_ERASEBKGND: return 1;
@@ -736,7 +746,7 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
     case WM_DPICHANGED: onDpi(HIWORD(w), (const RECT*)l); return 0;
     case WM_GETMINMAXINFO: {
       auto* mi = (MINMAXINFO*)l;
-      RECT rc = {0, 0, (LONG)std::lround(MIN_W * s()), (LONG)std::lround(MIN_H * s())};
+      RECT rc = {0, 0, (LONG)std::lround(MIN_W * dpi / 96.f), (LONG)std::lround(MIN_H * dpi / 96.f)};
       AdjustWindowRectExForDpi(&rc, WS_OVERLAPPEDWINDOW, FALSE, 0, (UINT)dpi);
       mi->ptMinTrackSize.x = rc.right - rc.left;
       mi->ptMinTrackSize.y = rc.bottom - rc.top;

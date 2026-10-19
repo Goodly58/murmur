@@ -26,6 +26,7 @@ public static class W {
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int hgt, uint flags);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr p, IntPtr a, string c, string t);
@@ -68,5 +69,7 @@ switch ($Cmd) {
   }
   "restore" { if ([W]::IsIconic($h)) { [W]::ShowWindow($h, 9) | Out-Null }; [W]::SetForegroundWindow($h) | Out-Null }
   "edittext" { $e = [W]::FindWindowEx($h, [IntPtr]::Zero, "EDIT", [NullString]::Value); if ($e -eq [IntPtr]::Zero) { Write-Output "no edit" } else { [W]::SendMessageStr($e, 0x000C, [IntPtr]0, $Text) | Out-Null; Start-Sleep -Milliseconds 50; [W]::SendMessage($e, 0x0100, [IntPtr]13, [IntPtr]0) | Out-Null; Write-Output "edit set" } }
+  "settext" { $e = [W]::FindWindowEx($h, [IntPtr]::Zero, "EDIT", [NullString]::Value); if ($e -eq [IntPtr]::Zero) { Write-Output "no edit" } else { [W]::SendMessageStr($e, 0x000C, [IntPtr]0, $Text) | Out-Null; Write-Output "text set" } }
+  "resize" { [W]::SetWindowPos($h, [IntPtr]::Zero, $X2, $Y2, $X, $Y, 0x0014) | Out-Null }   # -X/-Y = outer size, -X2/-Y2 = position
   "close" { [W]::PostMessage($h, 0x0010, [IntPtr]0, [IntPtr]0) | Out-Null }
 }
