@@ -1,28 +1,41 @@
-# Murmur
+<h1 align="center">Murmur</h1>
+<p align="center">Focus sounds that run themselves.</p>
+<p align="center"><a href="https://goodly58.github.io/murmur/"><b>Open</b></a> &nbsp;&middot;&nbsp; <a href="#install">Install</a> &nbsp;&middot;&nbsp; <a href="#run-locally">Run locally</a></p>
 
-Focus sound mixer. Pick a scene (Focus, Read, Create, Mask, White, Calm, Sleep) and it sets the sound mix, starts a live stream, runs the timer (25/5 and 50/10 cycles with automatic breaks, or a fade-out timer for Calm and Sleep) and fades out when the plan ends.
+<p align="center"><img src="docs/hero.png" alt="Murmur on desktop and phone" width="100%"></p>
 
-- **Open it:** https://goodly58.github.io/murmur/ . Use the install icon in the address bar to get it as an app window; after the first visit it also works offline (the live streams need a connection, the sounds do not).
-- **Run it from this folder:** double-click `Start Murmur.bat` (`py -3.13 serve.py`, localhost only). YouTube refuses to embed into `file://` pages, so a server is needed.
+<p align="center"><img src="docs/glance.png" alt="Seven scenes. Custom presets, live streams, spectrum, automatic breaks, offline." width="100%"></p>
 
-## How it stays light
+<p align="center"><img src="docs/bar.png" alt="The custom bar with saved presets" width="60%"></p>
 
-Each sound is synthesised once into a looping stereo buffer in a worker (`dsp.js`, `worker.js`) and freed 30 s after it stops. Playback is `BufferSource -> Gain`, with no per-sample JavaScript. The audio context is suspended when nothing is playing, the YouTube player only exists while a video is wanted, and the spectrum redraws only while the mix is changing.
+<p align="center"><img src="docs/light.png" alt="Light theme" width="66%">&nbsp;&nbsp;<img src="docs/phone.png" alt="Phone" width="21%"></p>
 
-## Files
+### Install
+
+Chrome or Edge: the install icon in the address bar. After the first visit it works offline.
+
+### Run locally
+
+Double-click `Start Murmur.bat`.
+
+<details>
+<summary>Under the hood</summary>
+
+<br>
+
+Each sound is synthesised once into a looping stereo buffer in a worker and freed 30 s after it stops, so playback is `BufferSource -> Gain` with no per-sample JavaScript. The audio context sleeps when nothing plays, the YouTube player only exists while a video is wanted, and the spectrum repaints only while the mix changes.
 
 | | |
 |---|---|
-| `index.html`, `style.css` | layout, icons, themes |
-| `ui.js` | scenes, ring, mix tiles, media panel, keyboard |
-| `engine.js` | audio graph, beats, chime, local music |
-| `session.js` | plan phases and timing |
+| `index.html` `style.css` | layout, icons, themes |
+| `ui.js` | scenes, ring, mix tiles, custom presets, media panel |
+| `engine.js` `dsp.js` `worker.js` | audio graph and sound synthesis |
+| `session.js` | plans, phases, timing |
 | `video.js` | YouTube wrapper, skips dead streams |
 | `spectrum.js` | live spectrum |
 | `data.js` | sounds, plans, scenes, stream ids |
-| `sw.js`, `manifest.webmanifest` | install and offline |
+| `sw.js` `manifest.webmanifest` | install and offline |
 
-## Maintenance
+`py -3.13 tools/check_streams.py` lists which stream ids are still live. `node tools/calibrate.js` re-measures the sound loops after a renderer change.
 
-- `py -3.13 tools/check_streams.py` lists which stream ids in `data.js` are still live and embeddable. Live-stream ids rotate when a stream restarts; the player skips dead ones by itself, but replace them when the list thins out.
-- `node tools/calibrate.js` re-measures the sound loops and prints the loudness table for `dsp.js` (`LOUD`). Run it after changing a renderer.
+</details>

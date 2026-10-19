@@ -55,6 +55,8 @@
   <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
   <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 3 19.5h18L12 4ZM12 10v4.5M12 17v.1"/></symbol>
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></symbol>
+  <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-4.2L6 20V5.5a1 1 0 0 1 1-1Z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
 </svg>
 
 <div class="app" id="app">
@@ -79,6 +81,15 @@
       <button type="button" class="icon-btn" id="btnKeys" title="Shortcuts (?)"><svg class="ic"><use href="#i-keys"/></svg></button>
     </div>
   </header>
+
+  <div class="presets" id="presets" role="toolbar" aria-label="Custom presets" data-empty="true">
+    <span class="plbl" title="Your saved mixes"><svg class="ic"><use href="#i-bookmark"/></svg><span>Custom</span></span>
+    <div class="pscroll">
+      <div class="pchips" id="pchips"></div>
+      <button type="button" class="padd" id="pAdd" title="Save the current mix as a preset"><svg class="ic"><use href="#i-plus"/></svg><span>Save mix</span></button>
+    </div>
+    <button type="button" class="icon-btn upd" id="pUpdate" title="Update this preset with the current mix" hidden><svg class="ic"><use href="#i-check"/></svg></button>
+  </div>
 
   <nav class="rail" aria-label="Scenes">
     <div class="scenes" id="scenes"></div>
@@ -183,6 +194,8 @@
     </section>
   </aside>
 </div>
+
+<div class="toast" id="toast" role="status" hidden><span id="toastMsg"></span><button type="button" id="toastAct"></button></div>
 
 <div class="drop" id="drop" aria-hidden="true"><svg class="ic"><use href="#i-note"/></svg></div>
 

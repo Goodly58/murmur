@@ -14,25 +14,50 @@ const RING = 2 * Math.PI * 150;
 /* ---------------- state ---------------- */
 
 const KEY = 'murmur.v2';
+const MAX_PRESETS = 24;
+const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
+const LIST_ID = /^[A-Za-z0-9_-]+$/;
+const PRESET_ID = /^c[A-Za-z0-9]{2,20}$/;
 
 function loadState() {
-  const d = { scene: 'focus', plans: {}, mixes: {}, beats: {}, beatsMode: 'binaural', master: 70, blend: 50,
+  const d = { scene: 'focus', plans: {}, mixes: {}, beats: {}, presets: [], beatsMode: 'binaural', master: 70, blend: 50,
     videoOn: true, custom: null, tab: 'video', wide: false, log: {} };
   let s = null;
   try { s = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { /* storage unavailable */ }
   if (!s || typeof s !== 'object') return d;
   const num = (v, lo, hi, def) => (v !== null && v !== '' && Number.isFinite(+v) ? clamp(+v, lo, hi) : def);
-  if (SCENES.some(x => x.id === s.scene)) d.scene = s.scene;
-  for (const sc of SCENES) {
-    if (s.plans && sc.plans.includes(s.plans[sc.id])) d.plans[sc.id] = s.plans[sc.id];
-    const m = s.mixes && s.mixes[sc.id];
-    if (m && typeof m === 'object') {
-      const mix = {};
-      for (const c of CHANNELS) { const v = num(m[c.id], 0, 100, 0); if (v) mix[c.id] = v; }
-      d.mixes[sc.id] = mix;
+  const cleanMix = m => {
+    const mix = {};
+    if (m && typeof m === 'object') for (const c of CHANNELS) { const v = num(m[c.id], 0, 100, 0); if (v) mix[c.id] = v; }
+    return mix;
+  };
+  const cleanBeat = b => (b && BANDS.some(x => x.id === b.band) ? { band: b.band, level: num(b.level, 0, 100, 20), on: !!b.on } : null);
+  const cleanVideo = v => {
+    if (v && typeof v.id === 'string' && VIDEO_ID.test(v.id)) return { id: v.id };
+    if (v && typeof v.list === 'string' && LIST_ID.test(v.list)) return { list: v.list };
+    return null;
+  };
+
+  // saved presets act like extra scenes: each has its own defaults and its own unsaved tweaks
+  const slots = SCENES.map(sc => ({ id: sc.id, plans: sc.plans }));
+  if (Array.isArray(s.presets)) {
+    for (const p of s.presets) {
+      const base = p && SCENES.find(x => x.id === p.base);
+      if (!base || d.presets.length >= MAX_PRESETS || !PRESET_ID.test(String(p.id)) || slots.some(x => x.id === p.id)) continue;
+      d.presets.push({
+        id: p.id, base: base.id, name: String(p.name || '').trim().slice(0, 24) || base.name,
+        plan: base.plans.includes(p.plan) ? p.plan : base.plans[0],
+        mix: cleanMix(p.mix), beat: cleanBeat(p.beat) || { band: 'alpha', level: 20, on: false }, video: cleanVideo(p.video)
+      });
+      slots.push({ id: p.id, plans: base.plans });
     }
-    const b = s.beats && s.beats[sc.id];
-    if (b && BANDS.some(x => x.id === b.band)) d.beats[sc.id] = { band: b.band, level: num(b.level, 0, 100, 20), on: !!b.on };
+  }
+  if (slots.some(x => x.id === s.scene)) d.scene = s.scene;
+  for (const sc of slots) {
+    if (s.plans && sc.plans.includes(s.plans[sc.id])) d.plans[sc.id] = s.plans[sc.id];
+    if (s.mixes && s.mixes[sc.id] && typeof s.mixes[sc.id] === 'object') d.mixes[sc.id] = cleanMix(s.mixes[sc.id]);
+    const b = s.beats && cleanBeat(s.beats[sc.id]);
+    if (b) d.beats[sc.id] = b;
   }
   if (['off', 'binaural', 'isochronic'].includes(s.beatsMode)) d.beatsMode = s.beatsMode;
   d.master = num(s.master, 0, 100, 70);
@@ -64,10 +89,24 @@ let closing = 0;
 let vIndex = 0, vTried = 0;
 const lastLevel = {};
 
-const scene = () => SCENES.find(s => s.id === S.scene);
+/* Stock scenes plus saved presets. A preset is a scene-like slot: it starts from its saved snapshot, and
+   tweaks go to the same overrides (S.mixes / S.beats / S.plans) until you update or reset it. */
+let sceneList = null;
+function allScenes() {
+  if (!sceneList) {
+    sceneList = [...SCENES, ...S.presets.map(p => {
+      const base = SCENES.find(x => x.id === p.base);
+      return { ...base, id: p.id, name: p.name, custom: true, base: base.id, mix: p.mix, beat: { ...p.beat },
+        plans: [p.plan, ...base.plans.filter(x => x !== p.plan)], videos: p.video ? [p.video] : base.videos };
+    })];
+  }
+  return sceneList;
+}
+const dropSceneCache = () => { sceneList = null; };
+const scene = () => allScenes().find(s => s.id === S.scene);
 const planId = () => S.plans[S.scene] || scene().plans[0];
 const mixOf = () => S.mixes[S.scene] || scene().mix;
-const beatOf = () => S.beats[S.scene] || (scene().beat ? { ...scene().beat, on: true } : { band: 'alpha', level: 20, on: false });
+const beatOf = () => S.beats[S.scene] || (scene().beat ? { on: true, ...scene().beat } : { band: 'alpha', level: 20, on: false });
 const bandOf = id => BANDS.find(b => b.id === id);
 const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -187,18 +226,24 @@ function togglePlay() { if (running) stopAll(); else startAll(); }
 
 /* ---------------- scenes and plans ---------------- */
 
-function selectScene(id) {
-  if (!SCENES.some(s => s.id === id) || (id === S.scene && running)) return;
+/* Switches to a scene or preset. With start=false the screen changes but nothing begins playing. */
+function enterScene(id, ramp, start = true) {
   S.scene = id;
   vIndex = 0;
   vTried = 0;
   session.setPlan(planId());
   renderPlans();
   paintScenes();
+  renderPresets();
   paintPlayer();
   paintStage(session.snapshot());
-  startAll(running ? 1.4 : 0.15);
+  if (start) startAll(ramp); else applyAudio(ramp);
   save();
+}
+
+function selectScene(id) {
+  if (!allScenes().some(s => s.id === id) || (id === S.scene && running)) return;
+  enterScene(id, running ? 1.4 : 0.15);
 }
 
 function selectPlan(id) {
@@ -243,6 +288,13 @@ function toggleTile(id) {
 function resetMix() {
   delete S.mixes[S.scene];
   delete S.beats[S.scene];
+  if (scene().custom && planDirty()) {        // a preset also goes back to its saved plan
+    delete S.plans[S.scene];
+    session.setPlan(planId());
+    renderPlans();
+    paintStage(session.snapshot());
+    if (running) session.start();
+  }
   if (running) applyAudio(0.4); else paintMix();
   save();
 }
@@ -253,6 +305,160 @@ function setBeatsMode(mode) {
   if (running) applyAudio(0.3); else paintMix();
   save();
 }
+
+/* ---------------- custom presets ---------------- */
+
+const planDirty = () => !!S.plans[S.scene] && S.plans[S.scene] !== scene().plans[0];
+const presetDirty = () => !!scene().custom && !!(S.mixes[S.scene] || S.beats[S.scene] || planDirty());
+let undoStash = null, toastTimer = 0;
+
+/* "Brown + Rain": the two loudest sounds, so a new preset needs no typing. */
+function autoName() {
+  const m = mixOf();
+  const top = CHANNELS.filter(c => m[c.id] > 0).sort((a, b) => m[b.id] - m[a.id]).slice(0, 2).map(c => c.name);
+  return (top.join(' + ') || scene().name).slice(0, 24);
+}
+
+function savePreset() {
+  if (S.presets.length >= MAX_PRESETS) { toast('Preset limit reached'); return; }
+  const src = S.scene;
+  const p = {
+    id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    name: autoName(), base: scene().base || scene().id, plan: planId(),
+    mix: { ...mixOf() }, beat: { ...beatOf() }, video: S.custom ? { ...S.custom } : null
+  };
+  // the working copy moves into the new preset; whatever it was based on returns to its own saved state
+  delete S.mixes[src];
+  delete S.beats[src];
+  if (scene().custom) delete S.plans[src];
+  S.presets.push(p);
+  dropSceneCache();
+  S.scene = p.id;
+  renderPresets();
+  paintScenes();
+  renderPlans();
+  paintMix();
+  paintStage(session.snapshot());
+  save();
+  startRename(p.id);
+}
+
+function updatePreset() {
+  const p = S.presets.find(x => x.id === S.scene);
+  if (!p) return;
+  p.mix = { ...mixOf() };
+  p.beat = { ...beatOf() };
+  p.plan = planId();
+  if (S.custom) p.video = { ...S.custom };
+  delete S.mixes[p.id];
+  delete S.beats[p.id];
+  delete S.plans[p.id];
+  dropSceneCache();
+  renderPresets();
+  renderPlans();
+  paintMix();
+  save();
+}
+
+function deletePreset(id) {
+  const i = S.presets.findIndex(p => p.id === id);
+  if (i < 0) return;
+  const [p] = S.presets.splice(i, 1);
+  undoStash = { p, i, mix: S.mixes[id], beat: S.beats[id], plan: S.plans[id], active: S.scene === id };
+  delete S.mixes[id];
+  delete S.beats[id];
+  delete S.plans[id];
+  if (undoStash.active) S.scene = p.base;
+  dropSceneCache();
+  if (undoStash.active) enterScene(p.base, running ? 1.4 : 0.15, running); else renderPresets();
+  save();
+  toast('Preset deleted', 'Undo', undoDelete);
+}
+
+function undoDelete() {
+  const u = undoStash;
+  if (!u) return;
+  undoStash = null;
+  hideToast();
+  S.presets.splice(Math.min(u.i, S.presets.length), 0, u.p);
+  if (u.mix) S.mixes[u.p.id] = u.mix;
+  if (u.beat) S.beats[u.p.id] = u.beat;
+  if (u.plan) S.plans[u.p.id] = u.plan;
+  dropSceneCache();
+  if (u.active) enterScene(u.p.id, running ? 1.4 : 0.15, running); else renderPresets();
+  save();
+}
+
+/* Inline rename: the chip turns into a text field; Enter or clicking away keeps the name, Escape keeps the old one. */
+function startRename(id) {
+  const chip = $('.pchip[data-id="' + id + '"]');
+  const p = S.presets.find(x => x.id === id);
+  if (!chip || !p) return;
+  const label = document.createElement('label');
+  label.className = 'pedit';
+  label.innerHTML = ic(SCENES.find(x => x.id === p.base).icon);
+  const input = document.createElement('input');
+  input.value = p.name;
+  input.maxLength = 24;
+  input.spellcheck = false;
+  input.setAttribute('aria-label', 'Preset name');
+  label.append(input);
+  $('.pmain', chip).replaceWith(label);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = commit => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim().slice(0, 24);
+    if (commit && name) { p.name = name; dropSceneCache(); save(); }
+    renderPresets();
+    paintStage(session.snapshot());
+  };
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+function renderPresets() {
+  $('#pchips').replaceChildren(...S.presets.map(p => {
+    const chip = document.createElement('div');
+    chip.className = 'pchip';
+    chip.dataset.id = p.id;
+    chip.innerHTML = `<button type="button" class="pmain">${ic(SCENES.find(x => x.id === p.base).icon)}<span class="nm"></span></button>` +
+      `<button type="button" class="px" aria-label="Delete preset" title="Delete">${ic('i-x')}</button>`;
+    $('.nm', chip).textContent = p.name;           // user text goes in as text, never as markup
+    $('.pmain', chip).title = p.name + ' (double-click to rename)';
+    return chip;
+  }));
+  paintPresets();
+}
+
+function paintPresets() {
+  $('#presets').dataset.empty = String(!S.presets.length);
+  for (const chip of $$('#pchips .pchip')) {
+    const on = chip.dataset.id === S.scene;
+    chip.setAttribute('aria-current', String(on));
+    chip.dataset.dirty = String(on && presetDirty());
+  }
+  $('#pUpdate').hidden = !presetDirty();
+  $('#pAdd').disabled = S.presets.length >= MAX_PRESETS;
+}
+
+function toast(msg, label, action) {
+  $('#toastMsg').textContent = msg;
+  const b = $('#toastAct');
+  b.hidden = !label;
+  b.textContent = label || '';
+  b.onclick = action || null;
+  $('#toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, 6000);
+}
+
+function hideToast() { $('#toast').hidden = true; clearTimeout(toastTimer); }
 
 /* ---------------- video and music ---------------- */
 
@@ -277,7 +483,10 @@ function paintPlayer() {
   $('#vClear').hidden = !custom;
   $('#vPrev').hidden = $('#vNext').hidden = custom || list.length < 2;
   const img = $('#posterImg'), src = w ? posterFor(w) : '';
-  if (src) { if (img.getAttribute('src') !== src) img.src = src; img.hidden = false; } else { img.removeAttribute('src'); img.hidden = true; }
+  if (src) {
+    if (img.getAttribute('src') !== src) { img.src = src; delete img.dataset.failed; }
+    img.hidden = img.dataset.failed === src;     // a thumbnail that failed to load stays hidden
+  } else { img.removeAttribute('src'); delete img.dataset.failed; img.hidden = true; }
   const st = $('#player').dataset.state;
   if (!w) setVState('none');
   else if (st === 'none') setVState('idle');
@@ -297,7 +506,7 @@ async function syncVideo(play) {
 video.cb.playing = title => {
   setVState('playing');
   // titles are full of emoji; drop them for a cleaner line
-  $('#vTitle').textContent = title.replace(/[\p{Extended_Pictographic}️‍]/gu, '').replace(/\s{2,}/g, ' ').trim();
+  $('#vTitle').textContent = title.replace(/[\p{Extended_Pictographic}\uFE0F\u200D]/gu, '').replace(/\s{2,}/g, ' ').trim();
   vTried = 0;
   applyVideoVolume();
 };
@@ -460,7 +669,8 @@ function paintMix() {
   for (const el of $$('#bands .band')) el.setAttribute('aria-checked', String(el.dataset.band === b.band));
   $('#mix').dataset.beats = on ? 'on' : 'off';
   $('#mix').classList.toggle('locked', brk);
-  $('#mixReset').hidden = !(S.mixes[S.scene] || S.beats[S.scene]);
+  $('#mixReset').hidden = !(S.mixes[S.scene] || S.beats[S.scene] || (scene().custom && planDirty()));
+  paintPresets();
 }
 
 function paintBeatsMode() {
@@ -591,6 +801,19 @@ function bind() {
     save();
   });
   $('#mixReset').addEventListener('click', resetMix);
+
+  $('#pchips').addEventListener('click', e => {
+    const chip = e.target.closest('.pchip');
+    if (!chip) return;
+    if (e.target.closest('.px')) deletePreset(chip.dataset.id);
+    else if (e.target.closest('.pmain')) selectScene(chip.dataset.id);
+  });
+  $('#pchips').addEventListener('dblclick', e => {
+    const chip = e.target.closest('.pchip');
+    if (chip && e.target.closest('.pmain')) startRename(chip.dataset.id);
+  });
+  $('#pAdd').addEventListener('click', savePreset);
+  $('#pUpdate').addEventListener('click', updatePreset);
   $('#beatsMode').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setBeatsMode(b.dataset.mode); });
 
   bindRange('#master', () => S.master, v => { S.master = v; muted = false; applyVolumes(); });
@@ -599,7 +822,7 @@ function bind() {
 
   $('#mediaTabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) setTab(b.dataset.tab); });
   $('#poster').addEventListener('click', () => startAll());
-  $('#posterImg').addEventListener('error', e => { e.target.hidden = true; }); // offline or blocked: no broken-image glyph
+  $('#posterImg').addEventListener('error', e => { e.target.dataset.failed = e.target.getAttribute('src'); e.target.hidden = true; }); // offline or blocked: no broken-image glyph
   $('#vPrev').addEventListener('click', () => stepVideo(-1));
   $('#vNext').addEventListener('click', () => stepVideo(1));
   $('#vClear').addEventListener('click', () => { S.custom = null; vTried = 0; paintPlayer(); if (running) syncVideo(true); save(); });
@@ -704,6 +927,7 @@ const spectrum = createSpectrum($('#spectrum'), () => engine.analyser, () => run
 build();
 session.setPlan(planId());
 renderPlans();
+renderPresets();
 paintScenes();
 paintBeatsMode();
 paintTabs();

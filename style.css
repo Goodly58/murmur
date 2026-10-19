@@ -60,8 +60,8 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 /* ---------- shell ---------- */
 .app {
   display: grid; height: 100dvh; min-height: 640px;
-  grid-template-columns: 232px minmax(0, 1fr) var(--side); grid-template-rows: 56px minmax(0, 1fr);
-  grid-template-areas: "top top top" "rail stage side";
+  grid-template-columns: 232px minmax(0, 1fr) var(--side); grid-template-rows: 56px 44px minmax(0, 1fr);
+  grid-template-areas: "top top top" "presets presets presets" "rail stage side";
 }
 .app.wide { grid-template-columns: 232px minmax(0, 1fr) clamp(560px, 36vw, 760px); }
 
@@ -71,6 +71,38 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .top-r { display: flex; align-items: center; gap: 14px; }
 .vol { display: flex; align-items: center; gap: 4px; }
 .vol input { width: 112px; }
+
+/* ---------- custom presets bar ---------- */
+.presets { grid-area: presets; display: flex; align-items: center; gap: 14px; min-width: 0; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line); }
+.plbl { display: inline-flex; align-items: center; gap: 7px; flex: none; color: var(--text-3); font-size: 12px; font-weight: 500; letter-spacing: .02em; }
+.plbl .ic { width: 16px; height: 16px; }
+.pscroll { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 3px 0; overflow-x: auto; scrollbar-width: none; }
+.pscroll::-webkit-scrollbar { display: none; }
+.pchips { display: contents; }
+.pchip { display: inline-flex; align-items: center; flex: none; height: 28px; max-width: 230px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text-2); }
+.pchip:hover { border-color: var(--line-2); color: var(--text); }
+.pchip[aria-current=true] { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+.pmain { display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: 100%; padding: 0 10px; font-size: 12.5px; font-weight: 500; }
+.pmain .ic, .pedit .ic { width: 15px; height: 15px; }
+.pmain .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pchip[data-dirty=true] .nm::after { content: ' \2022'; }
+.px { display: none; place-items: center; width: 20px; height: 20px; margin-right: 4px; border-radius: 5px; color: var(--text-3); }
+.pchip:hover .px, .pchip:focus-within .px { display: grid; }
+.pchip:hover .pmain, .pchip:focus-within .pmain { padding-right: 4px; }
+.px .ic { width: 12px; height: 12px; }
+.px:hover { color: var(--danger); background: var(--hover); }
+.pedit { display: inline-flex; align-items: center; gap: 7px; height: 100%; padding: 0 10px; }
+.pedit input { width: 140px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 12.5px; font-weight: 500; }
+.padd { display: inline-flex; align-items: center; gap: 6px; flex: none; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px dashed var(--line-2); color: var(--text-3); font-size: 12.5px; font-weight: 500; }
+.padd:hover { color: var(--text); border-color: var(--text-3); }
+.padd .ic { width: 15px; height: 15px; }
+.presets:not([data-empty=true]) .padd { padding: 0 6px; }
+.presets:not([data-empty=true]) .padd span { display: none; }
+.upd { color: var(--accent); }
+
+.toast { position: fixed; left: 50%; bottom: 24px; z-index: 60; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 16px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--raised); box-shadow: 0 12px 32px rgba(0, 0, 0, .35); font-size: 13px; }
+.toast button { padding: 5px 10px; border-radius: 8px; color: var(--accent); font-weight: 600; }
+.toast button:hover { background: var(--hover); }
 
 /* ---------- scenes ---------- */
 .rail { grid-area: rail; display: flex; flex-direction: column; justify-content: space-between; padding: 16px 12px; border-right: 1px solid var(--line); overflow: auto; }
@@ -107,7 +139,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 #ticks line.on { stroke: var(--text-3); }
 .ring-c { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
 .time { font-size: clamp(44px, calc(var(--ring) * .24), 80px); font-weight: 200; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; }
-.phase { font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+.phase { max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
 .ring[data-kind=break] .phase { color: var(--calm); }
 .ring[data-kind=done] .phase { color: var(--ok); }
 .done-ic { display: none; width: 44px; height: 44px; color: var(--ok); stroke-width: 1.4; }
@@ -244,6 +276,7 @@ body.dragging .drop { display: grid; }
   :root { --ring: min(70vw, 300px); --spec: 120px; }
   .app, .app.wide { display: block; height: auto; min-height: 100dvh; }
   .top { position: sticky; top: 0; z-index: 10; height: 52px; background: var(--bg); }
+  .presets { min-height: 44px; padding: 0 12px; }
   .rail { display: block; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--line); overflow: visible; }
   .scenes { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
   .scene { flex: 0 0 auto; flex-direction: column; justify-content: center; gap: 6px; width: 66px; height: 60px; padding: 0; font-size: 11.5px; }
@@ -256,7 +289,7 @@ body.dragging .drop { display: grid; }
   .top-r { gap: 8px; }
 }
 @media (max-width: 520px) {
-  .brand span { display: none; }
+  .brand span, .plbl span { display: none; }
   .vol input { width: 70px; }
   .seg.icons button { width: 30px; }
   .transport { gap: 16px; }
