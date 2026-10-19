@@ -1,16 +1,29 @@
 <h1 align="center">Murmur</h1>
 <p align="center">Focus sounds that run themselves.</p>
-<p align="center"><a href="https://goodly58.github.io/murmur/"><b>Open</b></a> &nbsp;&middot;&nbsp; <a href="#install">Install</a> &nbsp;&middot;&nbsp; <a href="#run-locally">Run locally</a></p>
+<p align="center"><a href="#windows-app"><b>Windows app</b></a> &nbsp;&middot;&nbsp; <a href="https://goodly58.github.io/murmur/">Web</a> &nbsp;&middot;&nbsp; <a href="#run-locally">Run locally</a></p>
 
-<p align="center"><img src="docs/hero.png" alt="Murmur on desktop and phone" width="100%"></p>
+<p align="center"><img src="docs/windows.png" alt="Murmur for Windows" width="100%"></p>
 
 <p align="center"><img src="docs/glance.png" alt="Seven scenes. Custom presets, live streams, spectrum, automatic breaks, offline." width="100%"></p>
 
+### Windows app
+
+Native. No browser, no runtime: one 1 MB program, about 22 MB of memory and under 1% of a core while playing.
+
+```
+native\build.cmd
+native\bin\Murmur.exe --install
+```
+
+Then press the Windows key and type **Murmur**. `--uninstall` removes it again.
+
+Streams and your own music play through [mpv](https://mpv.io) (`C:\mpv` or on PATH), YouTube through yt-dlp next to it. The sounds need neither.
+
+<p align="center"><img src="docs/windows-light.png" alt="Light theme" width="66%"></p>
+
+### Web app
+
 <p align="center"><img src="docs/bar.png" alt="The custom bar with saved presets" width="60%"></p>
-
-<p align="center"><img src="docs/light.png" alt="Light theme" width="66%">&nbsp;&nbsp;<img src="docs/phone.png" alt="Phone" width="21%"></p>
-
-### Install
 
 Chrome or Edge: the install icon in the address bar. After the first visit it works offline.
 
@@ -23,7 +36,18 @@ Double-click `Start Murmur.bat`.
 
 <br>
 
-Each sound is synthesised once into a looping stereo buffer in a worker and freed 30 s after it stops, so playback is `BufferSource -> Gain` with no per-sample JavaScript. The audio context sleeps when nothing plays, the YouTube player only exists while a video is wanted, and the spectrum repaints only while the mix changes.
+**Windows app** (`native/`, C++17, Win32 + Direct2D + WASAPI, MinGW-w64): every sound is synthesised once into a looping stereo buffer on a worker thread and freed 30 s after it stops. Audio goes straight to WASAPI in shared mode; the window repaints only the region that changed, the spectrum timer sleeps when the picture settles, and mpv is a separate process that exists only while a stream or a file plays. `Murmur.exe --selftest` runs 300+ checks (audio levels, scheduling, presets, hit-testing and rendered pixels); `--snapshot out.png --do presets --do spectrum` draws the real UI offscreen.
+
+| | |
+|---|---|
+| `audio.cpp` `dsp.cpp` | mixer, beats, chimes, WASAPI; the sound synthesis |
+| `session.cpp` `model.cpp` `app.cpp` | plans and timing, saved state and presets, the controller |
+| `ui.cpp` `ui_paint.cpp` `gfx.cpp` | layout and input, drawing, icons from the web sprite |
+| `window.cpp` | window, timers, drag and drop, taskbar, single instance |
+| `stream.cpp` `resolver.cpp` | mpv over a pipe; finds live streams for each scene daily |
+| `install.cpp` | per-user install and Start menu entry |
+
+**Web app**: each sound is synthesised once into a looping stereo buffer in a worker, so playback is `BufferSource -> Gain` with no per-sample JavaScript. The audio context sleeps when nothing plays, the YouTube player only exists while a video is wanted, and the spectrum repaints only while the mix changes.
 
 | | |
 |---|---|
