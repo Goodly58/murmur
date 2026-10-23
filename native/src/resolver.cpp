@@ -53,7 +53,7 @@ void spit(const wstring& path, const string& data) {
 }
 
 // the label and radio channels that carry the streams the scenes ask for
-const wchar_t* const STREAM_CHANNELS[] = {L"@LofiGirl", L"@ChillhopMusic", L"@DEEPHOUSEMIX79-k7e", L"@artofminimaltechno", L"@LiquidHourDnB", L"@gamechops"};
+const wchar_t* const STREAM_CHANNELS[] = {L"@LofiGirl", L"@ChillhopMusic", L"@DEEPHOUSEMIX79-k7e", L"@TheGrandSound", L"@artofminimaltechno", L"@LiquidHourDnB", L"@gamechops"};
 
 bool loadCache(std::map<string, vector<string>>& out, int64_t* at) { return parseCacheText(slurp(cachePath()), out, at); }
 

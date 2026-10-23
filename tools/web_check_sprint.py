@@ -1,4 +1,4 @@
-"""Opens the local web app, picks Sprint and checks the scene list, plan, tile levels and the 2 shortcut.
+"""Opens the local web app, picks Sprint and checks the scene list, plan, tile levels, stream order and the 2 shortcut.
     py -3.13 tools/web_check_sprint.py   (starts serve.py itself, then checks the scene list and shortcuts)"""
 import subprocess
 import sys
@@ -40,6 +40,10 @@ try:
         levels = page.evaluate("() => Object.fromEntries([...document.querySelectorAll('#tiles .tile')].map(t => [t.dataset.ch, t.getAttribute('aria-valuenow')]))")
         check("pink 14, brown 8, beats 24", levels.get("pink") == "14" and levels.get("brown") == "8" and levels.get("beats") == "24", str(levels))
         check("the ring is labelled Sprint", page.inner_text("#phase").strip().lower() == "sprint")
+        videos = page.evaluate("async () => (await import('./data.js')).SCENES.find(s => s.id === 'sprint').videos")
+        check("seven streams, the vocal house first and the deep house radio second", len(videos) == 7 and videos[:2] == ["8BzYJsT1FhA", "Ihm9OQWmibA"], str(videos))
+        poster = page.get_attribute("#posterImg", "src") or ""
+        check("the player starts on the vocal house", "/8BzYJsT1FhA/" in poster, poster)
         page.click('#scenes .scene[data-scene="focus"]')
         page.wait_for_timeout(300)
         page.keyboard.press("2")

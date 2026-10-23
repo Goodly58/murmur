@@ -86,13 +86,14 @@ static vector<SceneDef> buildScenes() {
       {"p25", "p50", "free"}, {"rFZHOHl-L8A", "5yx6BWlEVcY", "3PFJ9SETS4M", "0muHFBSiybw", "1Tl2FtV06qo"},
       {"lofi hip hop radio", "chillhop radio", "lofi house", "summer lofi", "asian lofi"}, {"sleep", "christmas", "halloween", "sad"});
   // Sprint: quick, intense work that is not mentally heavy (email, admin, data entry, repetitive sets). A light
-  // noise bed under music with a steady pulse, in the order of the ranking: house and techno, synthwave, liquid
-  // drum and bass, video-game study radio, lofi house. Beta beats (16 Hz) are the band that improved vigilance in
-  // Lane et al. 1998. Short 15 minute rounds keep the pace up.
+  // noise bed under music with a steady pulse, in the order of the ranking: vocal house with the instrumental deep
+  // house radio behind it as its backup, techno, synthwave, liquid drum and bass, video-game study radio, lofi
+  // house. Beta beats (16 Hz) are the band that improved vigilance in Lane et al. 1998. Short 15 minute rounds
+  // keep the pace up.
   add("sprint", L"Sprint", "i-bolt", true, mk({{"pink", 14}, {"brown", 8}}), bandIndex("beta"), 24, true,
-      {"p15", "p25", "free"}, {"8BzYJsT1FhA", "UYOb37KRFqk", "4xDzrJKXOOY", "g6yxzlbV2gI", "Tb2PjZ54jG0", "3PFJ9SETS4M"},
-      {"luxury vocal house", "minimal techno deep radio", "synthwave radio", "liquid drum bass radio",
-       "video game study lounge", "lofi house radio"},
+      {"p15", "p25", "free"}, {"8BzYJsT1FhA", "Ihm9OQWmibA", "UYOb37KRFqk", "4xDzrJKXOOY", "g6yxzlbV2gI", "Tb2PjZ54jG0", "3PFJ9SETS4M"},
+      {"luxury vocal house", "deep house smooth background study", "minimal techno deep radio", "synthwave radio",
+       "liquid drum bass radio", "video game study lounge", "lofi house radio"},
       {"sleep", "christmas", "halloween"});
   add("read", L"Read", "i-book", true, mk({{"pink", 36}, {"rain", 16}}), bandIndex("alpha"), 20, false,
       {"p50", "p25", "free"}, {"jXAEIWcGXwE", "N0snMcR6aaA", "E_XmwjgRLz8"},

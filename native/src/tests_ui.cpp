@@ -538,10 +538,11 @@ void testSprint(TestLog& t) {
   const PlanDef* p = findPlan("p15");
   t.check("sprint: four 15 minute rounds with 3 minute breaks",
           p && p->phases.size() == 7 && p->phases[0].kind == PH_FOCUS && p->phases[0].ms == 15 * 60000 && p->phases[1].kind == PH_BREAK && p->phases[1].ms == 3 * 60000);
-  bool ids = sp->streams.size() == 6;
+  bool ids = sp->streams.size() == 7;
   for (auto& id : sp->streams) if (id.size() != 11) ids = false;
-  t.check("sprint: six streams, ranked: house, techno, synthwave, drum and bass, game study radio, lofi house",
-          ids && sp->streams[0] == "8BzYJsT1FhA" && sp->streams[2] == "4xDzrJKXOOY" && sp->streams[5] == "3PFJ9SETS4M");
+  t.check("sprint: seven streams, ranked: vocal house, its deep house backup, techno, synthwave, drum and bass, game study radio, lofi house",
+          ids && sp->streams[0] == "8BzYJsT1FhA" && sp->streams[1] == "Ihm9OQWmibA" && sp->streams[3] == "4xDzrJKXOOY" && sp->streams[6] == "3PFJ9SETS4M");
+  t.check("sprint: each stream has a title hint of its own, in the same order", sp->hintInclude.size() == sp->streams.size() && sp->hintInclude[1] == "deep house smooth background study");
 
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   Rig r;
@@ -550,6 +551,10 @@ void testSprint(TestLog& t) {
   r.ui->key('2', false, false);
   t.check("sprint: the 2 key starts it on the 15 minute plan", app.model.s.scene == "sprint" && app.model.planId() == "p15" && app.running && app.session.planId() == "p15");
   t.check("sprint: it begins with the house stream", app.wantedSpec() == "8BzYJsT1FhA", app.wantedSpec());
+  app.stepStream(1);
+  t.check("sprint: next goes to the deep house radio kept as its backup", app.wantedSpec() == "Ihm9OQWmibA", app.wantedSpec());
+  app.stepStream(-1);
+  t.check("sprint: and previous comes back to the vocal house", app.wantedSpec() == "8BzYJsT1FhA", app.wantedSpec());
   r.advance(1000);
   const auto e = app.effective();
   t.check("sprint: beta beats at 16 Hz are on", e.beat.mode == 1 && e.beat.hz == 16 && e.beat.level == 24);
@@ -563,11 +568,12 @@ void testSprint(TestLog& t) {
       {"CCCCCCCCCCC", "is_live", L"lofi house radio   lounge music to vibe/chill to"},
       {"DDDDDDDDDDD", "was_live", L"Liquid Drum & Bass Radio 24/7"},
       {"EEEEEEEEEEE", "is_live", L"Baroque Beats Radio 24/7"},
+      {"FFFFFFFFFFF", "is_live", L"Deep House - Smooth Background Study Music - 24/7 Live Radio"},
   };
   const auto m = matchStreams(entries);
   const auto it = m.find("sprint");
-  t.check("sprint: fresh streams keep the ranking (house, synthwave, lofi house), skip ended ones and no longer pick up baroque radios",
-          it != m.end() && it->second.size() == 3 && it->second[0] == "BBBBBBBBBBB" && it->second[1] == "AAAAAAAAAAA" && it->second[2] == "CCCCCCCCCCC");
+  t.check("sprint: fresh streams keep the ranking (vocal house, deep house, synthwave, lofi house), skip ended ones and no longer pick up baroque radios",
+          it != m.end() && it->second.size() == 4 && it->second[0] == "BBBBBBBBBBB" && it->second[1] == "FFFFFFFFFFF" && it->second[2] == "AAAAAAAAAAA" && it->second[3] == "CCCCCCCCCCC");
 }
 
 // ---------------------------------------------------------------------------------------------------
