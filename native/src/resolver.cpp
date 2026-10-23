@@ -52,11 +52,56 @@ void spit(const wstring& path, const string& data) {
   MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
 }
 
-// cache: {"at": <unix seconds>, "fresh": {"focus": ["id", ...], ...}}
-bool loadCache(std::map<string, vector<string>>& out, int64_t* at) {
+// the label and radio channels that carry the streams the scenes ask for
+const wchar_t* const STREAM_CHANNELS[] = {L"@LofiGirl", L"@ChillhopMusic", L"@DEEPHOUSEMIX79-k7e", L"@artofminimaltechno", L"@LiquidHourDnB", L"@gamechops"};
+
+bool loadCache(std::map<string, vector<string>>& out, int64_t* at) { return parseCacheText(slurp(cachePath()), out, at); }
+
+void saveCache(const std::map<string, vector<string>>& m) { spit(cachePath(), cacheText(m, wallMs() / 1000)); }
+
+}  // namespace
+
+string hintSignature() {
+  uint64_t h = 1469598103934665603ull;  // FNV-1a
+  auto mix = [&h](const string& s) {
+    for (unsigned char c : s) { h ^= c; h *= 1099511628211ull; }
+    h ^= 0xFF;
+    h *= 1099511628211ull;
+  };
+  for (const wchar_t* ch : STREAM_CHANNELS) mix(narrow(ch));
+  for (const SceneDef& sc : stockScenes()) {
+    mix(sc.id);
+    for (const string& x : sc.hintInclude) mix(x);
+    mix("-");
+    for (const string& x : sc.hintExclude) mix(x);
+    mix("=");
+  }
+  char b[24];
+  snprintf(b, sizeof b, "%016llx", (unsigned long long)h);
+  return b;
+}
+
+// cache: {"at": <unix seconds>, "sig": <hintSignature>, "fresh": {"focus": ["id", ...], ...}}
+string cacheText(const std::map<string, vector<string>>& m, int64_t at) {
+  Json fresh = Json::obj();
+  for (auto& kv : m) {
+    Json a = Json::arr();
+    for (auto& id : kv.second) a.push(Json::str(id));
+    fresh.set(kv.first, a);
+  }
+  Json j = Json::obj();
+  j.set("at", Json::num((double)at));
+  j.set("sig", Json::str(hintSignature()));
+  j.set("fresh", fresh);
+  return jsonString(j, 1);
+}
+
+bool parseCacheText(const string& text, std::map<string, vector<string>>& out, int64_t* at) {
   bool ok = false;
-  const Json j = parseJson(slurp(cachePath()), &ok);
+  const Json j = parseJson(text, &ok);
   if (!ok || !j.isObj()) return false;
+  const Json* sig = j.get("sig");
+  if (!sig || sig->strOr("") != hintSignature()) return false;  // written for other hints (or before there was a signature): ask again
   const Json* atj = j.get("at");
   *at = atj ? (int64_t)atj->numOr(0) : 0;
   const Json* f = j.get("fresh");
@@ -68,21 +113,6 @@ bool loadCache(std::map<string, vector<string>>& out, int64_t* at) {
   }
   return !out.empty();
 }
-
-void saveCache(const std::map<string, vector<string>>& m) {
-  Json fresh = Json::obj();
-  for (auto& kv : m) {
-    Json a = Json::arr();
-    for (auto& id : kv.second) a.push(Json::str(id));
-    fresh.set(kv.first, a);
-  }
-  Json j = Json::obj();
-  j.set("at", Json::num((double)(wallMs() / 1000)));
-  j.set("fresh", fresh);
-  spit(cachePath(), jsonString(j, 1));
-}
-
-}  // namespace
 
 vector<StreamEntry> parseFlatList(const string& output) {
   vector<StreamEntry> out;
@@ -140,8 +170,7 @@ void startResolver(HWND hwnd, UINT msg, const wstring& ytdlp, bool force) {
     if (ytdlp.empty() || (!force && cached && age < 20 * 3600 && age >= 0)) return;
 
     vector<StreamEntry> all;
-    // the label and radio channels that carry the streams the scenes ask for
-    for (const wchar_t* ch : {L"@LofiGirl", L"@ChillhopMusic", L"@TheGrandSound", L"@artofminimaltechno", L"@LiquidHourDnB", L"@gamechops", L"@naxosjapan"}) {
+    for (const wchar_t* ch : STREAM_CHANNELS) {
       string out;
       int code = 0;
       const wstring cl = L"\"" + ytdlp + L"\" --flat-playlist --playlist-end 60 --no-warnings --print \"%(id)s\t%(live_status)s\t%(title)s\" https://www.youtube.com/" + ch + L"/streams";

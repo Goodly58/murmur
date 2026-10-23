@@ -57,10 +57,10 @@ export const SCENES = [
     videos: ['rFZHOHl-L8A', '5yx6BWlEVcY', '3PFJ9SETS4M', '0muHFBSiybw', '1Tl2FtV06qo'] },
   /* Sprint: quick, intense work that is not mentally heavy (email, admin, data entry, repetitive sets). A light noise
      bed under music with a steady pulse, ranked: house and techno, synthwave, liquid drum and bass, game study
-     radio, baroque. Beta beats (16 Hz) are the band that improved vigilance in Lane et al. 1998. */
+     radio, lofi house. Beta beats (16 Hz) are the band that improved vigilance in Lane et al. 1998. */
   { id: 'sprint', name: 'Sprint', icon: 'i-bolt', study: true, mix: { pink: 14, brown: 8 },
     beat: { band: 'beta', level: 24 }, plans: ['p15', 'p25', 'free'],
-    videos: ['Ihm9OQWmibA', 'UYOb37KRFqk', '4xDzrJKXOOY', 'g6yxzlbV2gI', 'Tb2PjZ54jG0', 'iODXbOA6T3o'] },
+    videos: ['8BzYJsT1FhA', 'UYOb37KRFqk', '4xDzrJKXOOY', 'g6yxzlbV2gI', 'Tb2PjZ54jG0', '3PFJ9SETS4M'] },
   { id: 'read',   name: 'Read',   icon: 'i-book', study: true, mix: { pink: 36, rain: 16 },
     beat: null, plans: ['p50', 'p25', 'free'],
     videos: ['jXAEIWcGXwE', 'N0snMcR6aaA', 'E_XmwjgRLz8'] },

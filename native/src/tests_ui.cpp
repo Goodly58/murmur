@@ -371,6 +371,19 @@ void testResolver(TestLog& t) {
   t.check("resolver: Read gets the classical radio and Calm the fireplace", m.count("read") && m.at("read")[0] == "jXAEIWcGXwE" && m.count("calm") && m.at("calm")[0] == "q_4KI-ChIIs");
   t.check("resolver: ended streams are not offered", !m.count("create") || std::find(m.at("create").begin(), m.at("create").end(), "DWcJFNfaw9c") == m.at("create").end());
   t.check("resolver: scenes with no stream get nothing", !m.count("mask") && !m.count("white"));
+
+  // the cache must not outlive the hints that produced it, or a retired stream keeps coming back
+  std::map<string, vector<string>> back;
+  int64_t when = 0;
+  const string saved = cacheText(m, 1700000000);
+  t.check("resolver: the cache round-trips", parseCacheText(saved, back, &when) && when == 1700000000 && back == m);
+  string other = saved;
+  const size_t sigAt = other.find(hintSignature());
+  if (sigAt != string::npos) other[sigAt] = other[sigAt] == '0' ? '1' : '0';
+  std::map<string, vector<string>> none;
+  t.check("resolver: a cache written under other hints is ignored", sigAt != string::npos && !parseCacheText(other, none, &when) && none.empty());
+  t.check("resolver: a cache from before there was a signature is ignored",
+          !parseCacheText("{\"at\": 1700000000, \"fresh\": {\"sprint\": [\"iODXbOA6T3o\"]}}", none, &when) && none.empty());
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -527,7 +540,8 @@ void testSprint(TestLog& t) {
           p && p->phases.size() == 7 && p->phases[0].kind == PH_FOCUS && p->phases[0].ms == 15 * 60000 && p->phases[1].kind == PH_BREAK && p->phases[1].ms == 3 * 60000);
   bool ids = sp->streams.size() == 6;
   for (auto& id : sp->streams) if (id.size() != 11) ids = false;
-  t.check("sprint: six streams, ranked: house, techno, synthwave, drum and bass, game study radio, baroque", ids && sp->streams[0] == "Ihm9OQWmibA" && sp->streams[2] == "4xDzrJKXOOY");
+  t.check("sprint: six streams, ranked: house, techno, synthwave, drum and bass, game study radio, lofi house",
+          ids && sp->streams[0] == "8BzYJsT1FhA" && sp->streams[2] == "4xDzrJKXOOY" && sp->streams[5] == "3PFJ9SETS4M");
 
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   Rig r;
@@ -535,7 +549,7 @@ void testSprint(TestLog& t) {
   App& app = *r.app;
   r.ui->key('2', false, false);
   t.check("sprint: the 2 key starts it on the 15 minute plan", app.model.s.scene == "sprint" && app.model.planId() == "p15" && app.running && app.session.planId() == "p15");
-  t.check("sprint: it begins with the steadiest stream", app.wantedSpec() == "Ihm9OQWmibA", app.wantedSpec());
+  t.check("sprint: it begins with the house stream", app.wantedSpec() == "8BzYJsT1FhA", app.wantedSpec());
   r.advance(1000);
   const auto e = app.effective();
   t.check("sprint: beta beats at 16 Hz are on", e.beat.mode == 1 && e.beat.hz == 16 && e.beat.level == 24);
@@ -545,12 +559,13 @@ void testSprint(TestLog& t) {
 
   vector<StreamEntry> entries = {
       {"AAAAAAAAAAA", "is_live", L"synthwave radio - beats to chill/game to"},
-      {"BBBBBBBBBBB", "is_live", L"Deep House \u2014 Smooth Background Study Music \u2014 24/7 Live Radio"},
-      {"CCCCCCCCCCC", "is_live", L"Baroque Beats Radio 24/7"},
+      {"BBBBBBBBBBB", "is_live", L"LIVE 24/7 | Deep House 2026-2027 Luxury Vocal House, Chill Grooves & Night Drive Vibes"},
+      {"CCCCCCCCCCC", "is_live", L"lofi house radio   lounge music to vibe/chill to"},
       {"DDDDDDDDDDD", "was_live", L"Liquid Drum & Bass Radio 24/7"},
+      {"EEEEEEEEEEE", "is_live", L"Baroque Beats Radio 24/7"},
   };
   const auto m = matchStreams(entries);
   const auto it = m.find("sprint");
-  t.check("sprint: fresh streams keep the ranking (house, synthwave, baroque) and skip ended ones",
+  t.check("sprint: fresh streams keep the ranking (house, synthwave, lofi house), skip ended ones and no longer pick up baroque radios",
           it != m.end() && it->second.size() == 3 && it->second[0] == "BBBBBBBBBBB" && it->second[1] == "AAAAAAAAAAA" && it->second[2] == "CCCCCCCCCCC");
 }
