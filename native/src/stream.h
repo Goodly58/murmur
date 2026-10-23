@@ -17,9 +17,11 @@ class Stream {
   Stream();
   ~Stream();
 
-  // Finds mpv and yt-dlp (PATH, C:\mpv, ...). Returns false if mpv is missing.
+  // Finds mpv and yt-dlp (PATH, C:\mpv, the tools Murmur downloaded, ...). Returns false if mpv is missing.
   bool configure();
   void configure(const wstring& mpv, const wstring& ytdlp);
+  // The folders looked in after PATH, in order.
+  static vector<wstring> searchDirs();
   bool available() const { return !mpv_.empty(); }
   const wstring& mpvPath() const { return mpv_; }
   const wstring& ytdlpPath() const { return ytdlp_; }

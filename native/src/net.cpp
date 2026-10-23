@@ -35,6 +35,68 @@ bool httpsGet(const wstring& host, const wstring& path, vector<uint8_t>& out, in
   return ok;
 }
 
+bool httpsDownload(const wstring& url, const wstring& file, const std::function<void(int64_t)>& onChunk, wstring* error) {
+  auto fail = [&](const wstring& why) {
+    if (error) *error = why;
+    return false;
+  };
+  wchar_t host[256] = {}, path[2048] = {}, extra[2048] = {};
+  URL_COMPONENTS uc = {};
+  uc.dwStructSize = sizeof uc;
+  uc.lpszHostName = host;
+  uc.dwHostNameLength = 256;
+  uc.lpszUrlPath = path;
+  uc.dwUrlPathLength = 2048;
+  uc.lpszExtraInfo = extra;
+  uc.dwExtraInfoLength = 2048;
+  if (!WinHttpCrackUrl(url.c_str(), 0, 0, &uc) || uc.nScheme != INTERNET_SCHEME_HTTPS) return fail(L"That is not a download address.");
+
+  HINTERNET ses = WinHttpOpen(L"Murmur/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, nullptr, nullptr, 0);
+  if (!ses) return fail(L"Couldn't start the download.");
+  WinHttpSetTimeouts(ses, 15000, 15000, 30000, 60000);
+  HINTERNET con = WinHttpConnect(ses, host, uc.nPort, 0);
+  HINTERNET req = con ? WinHttpOpenRequest(con, L"GET", (wstring(path) + extra).c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE) : nullptr;
+  HANDLE out = INVALID_HANDLE_VALUE;
+  bool created = false;
+  wstring why;
+  if (!req || !WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(req, nullptr)) {
+    why = L"Couldn't reach " + wstring(host) + L". Check your connection.";
+  } else {
+    DWORD status = 0, sz = sizeof status, length = 0, lsz = sizeof length;
+    WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &status, &sz, WINHTTP_NO_HEADER_INDEX);
+    const bool known = WinHttpQueryHeaders(req, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &length, &lsz, WINHTTP_NO_HEADER_INDEX) != 0;
+    out = status == 200 ? CreateFileW(file.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr) : INVALID_HANDLE_VALUE;
+    created = out != INVALID_HANDLE_VALUE;
+    if (status != 200) why = L"The download failed (HTTP " + std::to_wstring(status) + L").";
+    else if (out == INVALID_HANDLE_VALUE) why = L"Couldn't save the download.";
+    else {
+      vector<char> buf(64 * 1024);
+      int64_t total = 0;
+      for (;;) {
+        DWORD got = 0;
+        if (!WinHttpReadData(req, buf.data(), (DWORD)buf.size(), &got)) { why = L"The download was interrupted."; break; }
+        if (!got) {
+          if (known && total != (int64_t)length) why = L"The download was cut short.";
+          break;
+        }
+        DWORD wrote = 0;
+        if (!WriteFile(out, buf.data(), got, &wrote, nullptr) || wrote != got) { why = L"Couldn't save the download."; break; }
+        total += got;
+        onChunk(got);
+      }
+    }
+  }
+  if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
+  if (req) WinHttpCloseHandle(req);
+  if (con) WinHttpCloseHandle(con);
+  WinHttpCloseHandle(ses);
+  if (!why.empty()) {
+    if (created) DeleteFileW(file.c_str());
+    return fail(why);
+  }
+  return true;
+}
+
 bool runCapture(const wstring& cmdline, string& out, int timeoutMs, int* exitCode) {
   out.clear();
   SECURITY_ATTRIBUTES sa = {sizeof sa, nullptr, TRUE};

@@ -28,7 +28,7 @@ HitKind kindByName(const string& n) {
       {"reset", H_RESET}, {"beatmode", H_BEATMODE}, {"mute", H_MUTE}, {"master", H_MASTER}, {"blend", H_BLEND}, {"info", H_INFO},
       {"keys", H_KEYS}, {"chip", H_CHIP}, {"chipx", H_CHIPX}, {"padd", H_PADD}, {"pupd", H_PUPD}, {"tab", H_TAB}, {"link", H_LINK},
       {"video", H_VIDEO}, {"watch", H_WATCH}, {"player", H_PLAYER}, {"vprev", H_VPREV}, {"vnext", H_VNEXT}, {"vclear", H_VCLEAR},
-      {"filepick", H_FILEPICK}, {"toastact", H_TOASTACT}, {"mini", H_MINI}};
+      {"filepick", H_FILEPICK}, {"toastact", H_TOASTACT}, {"mini", H_MINI}, {"setup", H_SETUP}};
   auto it = m.find(n);
   return it == m.end() ? H_NONE : it->second;
 }
@@ -110,6 +110,14 @@ void act(Rig& r, const string& a) {
     ui.changed();
   }
   else if (c == "title") { app.streamTitle = widen(p[1]); ui.changed(); }
+  else if (c == "tools") { app.stream.configure(p[1] == "none" ? L"" : L"mpv.exe", L""); ui.changed(); }  // tools:none, or tools:mpv (only yt-dlp missing)
+  else if (c == "setup") {  // setup:running:42:Downloading mpv, or setup:failed:Couldn't reach GitHub. Check your connection.
+    app.setupState = p[1] == "running" ? SETUP_RUNNING : p[1] == "failed" ? SETUP_FAILED : SETUP_IDLE;
+    app.setupFraction = p[1] == "running" && p.size() > 2 ? std::stod(p[2]) / 100 : 0;
+    app.setupStep = p[1] == "running" && p.size() > 3 ? widen(p[3]) : L"";
+    app.setupError = p[1] == "failed" && p.size() > 2 ? widen(p[2]) : L"";
+    ui.changed();
+  }
   else if (c == "link") r.click(H_LINK);
   else if (c == "scroll") { for (int i = 0; i < std::stoi(p[1]); i++) ui.wheel(1100, 400, -120); }
   else if (c == "poster") {
@@ -156,7 +164,7 @@ int runSnapshot(int argc, wchar_t** argv) {
     if (wstring(argv[i]) != L"--hits") continue;
     static const char* names[] = {"none", "scene", "plan", "prev", "play", "next", "tile", "band", "reset", "beatmode", "mute", "master", "blend",
                                   "info", "keys", "chip", "chipx", "padd", "pupd", "tab", "link", "video", "watch", "player", "vprev", "vnext", "vclear",
-                                  "filepick", "fprev", "fnext", "fclear", "linkgo", "sheetclose", "sheetback", "evlink", "toastact", "pbar", "side", "mini"};
+                                  "filepick", "fprev", "fnext", "fclear", "linkgo", "sheetclose", "sheetback", "evlink", "toastact", "pbar", "side", "mini", "setup"};
     for (const Hit& h : r.ui->hits()) std::printf("%s %d %.0f %.0f\n", names[h.k], h.i, h.r.cx(), h.r.cy());
   }
 

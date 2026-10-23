@@ -8,6 +8,8 @@
 
 #include "audio.h"
 #include "common.h"
+#include "net.h"
+#include "setup.h"
 #include "tests.h"
 
 // MinGW only forward-declares IAudioMeterInformation, so the one method needed is declared here.
@@ -190,6 +192,46 @@ int runLostTest() {
   const bool ok = playingBefore && lost.load() == 1 && stopped;
   e.shutdown();
   std::printf("%s\n", ok ? "OUTPUT-LOST OK: the engine stopped and reported it" : "OUTPUT-LOST TEST FAILED");
+  return ok ? 0 : 1;
+}
+
+// `Murmur.exe --tools-test <folder>`: runs the real download of mpv and yt-dlp (the player's Set up button) into a
+// scratch folder, with MURMUR_TOOLS pointed there so nothing else on the PC is touched, then starts both once.
+int runToolsTest(const wstring& dir) {
+  SetEnvironmentVariableW(L"MURMUR_TOOLS", dir.c_str());
+  std::printf("tools folder: %s\n", narrow(toolsDir()).c_str());
+  wstring lastStep;
+  int lastPct = -10;
+  const auto t0 = std::chrono::steady_clock::now();
+  const wstring error = installTools(TOOL_MPV | TOOL_YTDLP, [&](const wstring& step, double fraction) {
+    const int pct = (int)(fraction * 100);
+    if (step == lastStep && pct < lastPct + 10) return;
+    lastStep = step;
+    lastPct = pct;
+    std::printf("  %3d%%  %s\n", pct, narrow(step).c_str());
+  }, realToolIO());
+  const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  if (!error.empty()) {
+    std::printf("TOOLS TEST FAILED after %.0f s: %s\n", secs, narrow(error).c_str());
+    return 1;
+  }
+  bool ok = true;
+  for (const wchar_t* rel : {L"\\mpv\\mpv.exe", L"\\yt-dlp.exe"}) {
+    const wstring exe = toolsDir() + rel;
+    WIN32_FILE_ATTRIBUTE_DATA fa = {};
+    const bool there = GetFileAttributesExW(exe.c_str(), GetFileExInfoStandard, &fa) != 0;
+    string out;
+    int code = -1;
+    if (there) runCapture(L"\"" + exe + L"\" --version", out, 30000, &code);
+    out = out.substr(0, out.find('\n'));
+    std::printf("  %s: %s, %.1f MB, --version -> %d: %s\n", narrow(exe.substr(toolsDir().size() + 1)).c_str(), there ? "present" : "MISSING",
+                there ? (double)(((uint64_t)fa.nFileSizeHigh << 32) | fa.nFileSizeLow) / 1048576.0 : 0.0, code, out.c_str());
+    ok = ok && there && code == 0;
+  }
+  const bool leftover = GetFileAttributesW((toolsDir() + L"\\.part").c_str()) != INVALID_FILE_ATTRIBUTES;
+  std::printf("  working folder cleaned up: %s\n", leftover ? "NO" : "yes");
+  ok = ok && !leftover;
+  std::printf("%s after %.0f s\n", ok ? "TOOLS TEST OK" : "TOOLS TEST FAILED", secs);
   return ok ? 0 : 1;
 }
 

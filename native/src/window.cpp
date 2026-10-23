@@ -17,7 +17,15 @@
 namespace {
 
 constexpr UINT THUMB_PREV = 1001, THUMB_PLAY = 1002, THUMB_NEXT = 1003;
-constexpr UINT WM_APP_STREAM = WM_APP + 1, WM_APP_POSTER = WM_APP + 2, WM_APP_FRESH = WM_APP + 3, WM_APP_SHOW = WM_APP + 4, WM_APP_EDITEND = WM_APP + 5, WM_APP_DEVLOST = WM_APP + 6;
+constexpr UINT WM_APP_STREAM = WM_APP + 1, WM_APP_POSTER = WM_APP + 2, WM_APP_FRESH = WM_APP + 3, WM_APP_SHOW = WM_APP + 4, WM_APP_EDITEND = WM_APP + 5, WM_APP_DEVLOST = WM_APP + 6,
+               WM_APP_SETUP = WM_APP + 7;
+
+// Progress, and then the result, of fetching mpv and yt-dlp on the worker thread.
+struct SetupMsg {
+  bool done = false, ok = false;
+  wstring step, error;
+  double fraction = 0;
+};
 enum : UINT_PTR { T_TICK = 1, T_SPEC, T_CLOSE, T_SPIN, T_TIP, T_SAVE, T_TOAST, T_SWEEP };
 constexpr wchar_t CLASS_NAME[] = L"MurmurMainWindow";
 constexpr float MIN_W = 940, MIN_H = 640;    // client size in DIPs
@@ -307,6 +315,27 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
     if (now - lastRefreshMs < 3600 * 1000) return;  // at most once an hour
     lastRefreshMs = now;
     startResolver(hwnd, WM_APP_FRESH, stream.ytdlpPath(), true);
+  };
+  app->startSetup = [hw = hwnd](int need) {
+    std::thread([hw, need] {
+      int64_t lastPost = 0;
+      wstring lastStep;
+      const wstring error = installTools(need, [&](const wstring& step, double fraction) {
+        const int64_t now = wallMs();
+        if (step == lastStep && now - lastPost < 120 && fraction < 1) return;  // the bar moves a few times a second, not on every read
+        lastStep = step;
+        lastPost = now;
+        auto* m = new SetupMsg;
+        m->step = step;
+        m->fraction = fraction;
+        if (!PostMessageW(hw, WM_APP_SETUP, 0, (LPARAM)m)) delete m;
+      }, realToolIO());
+      auto* m = new SetupMsg;
+      m->done = true;
+      m->ok = error.empty();
+      m->error = error;
+      if (!PostMessageW(hw, WM_APP_SETUP, 0, (LPARAM)m)) delete m;
+    }).detach();
   };
   stream.setSink([hw = hwnd](const StreamEvent& e) { PostMessageW(hw, WM_APP_STREAM, 0, (LPARAM) new StreamEvent(e)); });
 
@@ -1049,6 +1078,19 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
       std::unique_ptr<std::map<string, vector<string>>> f((std::map<string, vector<string>>*)l);
       app->fresh = *f;
       onAppChange();
+      return 0;
+    }
+    case WM_APP_SETUP: {
+      std::unique_ptr<SetupMsg> m((SetupMsg*)l);
+      if (!m->done) {
+        app->onSetupProgress(m->step, m->fraction);
+        return 0;
+      }
+      if (m->ok) {
+        stream.configure();  // look again, now that the tools are here
+        startResolver(hwnd, WM_APP_FRESH, stream.ytdlpPath(), true);  // yt-dlp can now list the live streams too
+      }
+      app->onSetupDone(m->ok, m->error);
       return 0;
     }
     case WM_APP_SHOW:

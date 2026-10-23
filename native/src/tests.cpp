@@ -554,6 +554,7 @@ void testApp(TestLog& t) {
   eng.start(false, 48000);
   Stream st;
   st.setDryRun(true);
+  st.configure(L"mpv.exe", L"yt-dlp.exe");  // pretend both are installed
   App app(eng, st);
   int64_t clock = 5000000;
   time_t today = 1760000000;
@@ -825,6 +826,7 @@ int runSelfTests(const string& only) {
   if (want("launch")) testLaunch(t);
   if (want("mini")) testMini(t);
   if (want("sprint")) testSprint(t);
+  if (want("setup")) { testSetup(t); testSetupUi(t); }
   if (want("dsp")) testDsp(t);
   if (want("audio")) testAudio(t);
   std::printf("\n%s: %d passed, %d failed\n", t.failed ? "FAILED" : "ALL PASSED", t.passed, t.failed);

@@ -22,6 +22,7 @@ struct Rig {
     if (!g.init()) return false;
     eng.start(false, 48000);
     st.setDryRun(true);
+    st.configure(L"mpv.exe", L"yt-dlp.exe");  // pretend both are installed; tests of the setup button take them away
     app = std::make_unique<App>(eng, st);
     app->session.setClock([this] { return clock; });
     app->model.nowFn = [this] { return today; };

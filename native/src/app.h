@@ -5,9 +5,11 @@
 #include "common.h"
 #include "model.h"
 #include "session.h"
+#include "setup.h"
 #include "stream.h"
 
 enum StreamState { SS_IDLE = 0, SS_LOADING, SS_PLAYING, SS_ERROR, SS_NONE };
+enum SetupState { SETUP_IDLE = 0, SETUP_RUNNING, SETUP_FAILED };
 
 struct Toast {
   wstring msg, action;
@@ -47,6 +49,9 @@ class App {
   Toast toast;
   std::map<string, vector<string>> fresh;  // stream ids found by title search, per scene id
   string loadedSpec;
+  SetupState setupState = SETUP_IDLE;      // fetching mpv and yt-dlp for a PC that lacks them
+  wstring setupStep, setupError;           // what it is doing now / why the last try failed
+  double setupFraction = 0;
 
   // hooks for the window layer
   std::function<void()> onChange;  // something visible changed: repaint
@@ -54,6 +59,9 @@ class App {
   std::function<void()> onSave;    // state changed: save soon
   std::function<void()> onWake;    // the spectrum should wake up
   std::function<void()> onNeedFresh;  // every known stream of a scene failed: look for newer ones
+  // Fetch the TOOL_* bits named in `need` on a worker thread. The window then reports through onSetupProgress
+  // and, once it has looked for the tools again, onSetupDone.
+  std::function<void(int need)> startSetup;
 
   void init();  // after the model is loaded
 
@@ -108,6 +116,12 @@ class App {
   string wantedSpec() const;
   vector<string> candidates() const;
 
+  // streaming tools: what the current tab needs and this PC lacks (TOOL_* bits), and the one-click fix
+  int toolsMissing() const;
+  void setupStreaming();
+  void onSetupProgress(const wstring& step, double fraction);
+  void onSetupDone(bool ok, const wstring& error);
+
   // helpers for the view
   struct Effective { Mix levels; BeatSpec beat; };
   Effective effective() const;
@@ -130,9 +144,10 @@ class App {
 
   int vIndex_ = 0, vTried_ = 0;
   int loadedGen_ = 0;
+  int setupNeed_ = 0;  // the TOOL_* bits the running setup was asked for
   int64_t closeStart_ = 0, pausedAt_ = 0;
   int focusTicks_ = 0;
-  bool filesLoaded_ = false, warnedNoPlayer_ = false;
+  bool filesLoaded_ = false, warnedNoPlayer_ = false, warnedNoYtdlp_ = false;
 };
 
 wstring cleanTitle(const wstring& t);

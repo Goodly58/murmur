@@ -482,15 +482,20 @@ void App::onStreamEvent(const StreamEvent& e) {
       changed();
       break;
     case StreamEvent::Failed: {
+      if (e.reason == "no player" && !warnedNoPlayer_) {
+        warnedNoPlayer_ = true;
+        showToast(L"Streams and music need mpv.", L"Set up", [this] { setupStreaming(); }, 12000);
+      }
       if (model.s.tab == "files") { streamState = SS_ERROR; changed(); break; }
       const size_t n = candidates().size();
-      if (e.reason == "no player" || !model.s.custom.empty() || n == 0 || (size_t)(++vTried_) >= n) {
+      const bool noYtdlp = e.reason != "no player" && stream.ytdlpPath().empty();  // every stream would fail the same way
+      if (e.reason == "no player" || noYtdlp || !model.s.custom.empty() || n == 0 || (size_t)(++vTried_) >= n) {
         streamState = SS_ERROR;
         loadedSpec.clear();
-        if (e.reason == "no player" && !warnedNoPlayer_) {
-          warnedNoPlayer_ = true;
-          showToast(L"mpv was not found, so streams and music are off. Sounds still work.", L"", nullptr, 9000);
-        } else if (e.reason != "no player" && model.s.custom.empty() && n > 0 && onNeedFresh) {
+        if (noYtdlp && !warnedNoYtdlp_) {
+          warnedNoYtdlp_ = true;
+          showToast(L"Streams need yt-dlp.", L"Set up", [this] { setupStreaming(); }, 12000);
+        } else if (e.reason != "no player" && !noYtdlp && model.s.custom.empty() && n > 0 && onNeedFresh) {
           onNeedFresh();  // the built-in ids may have gone stale
         }
         changed();
@@ -522,6 +527,68 @@ void App::retryStream() {
   vTried_ = 0;
   loadedSpec.clear();
   if (running) syncStream(true); else startAll();
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Streaming tools: mpv plays, yt-dlp reads YouTube. A PC without them gets a one-click download.
+// ---------------------------------------------------------------------------------------------------
+
+int App::toolsMissing() const {
+  int missing = 0;
+  if (!stream.available()) missing |= TOOL_MPV;
+  if (model.s.tab == "stream" && stream.ytdlpPath().empty()) missing |= TOOL_YTDLP;  // your own music needs only mpv
+  return missing;
+}
+
+void App::setupStreaming() {
+  const int need = toolsMissing();
+  if (setupState == SETUP_RUNNING || !need) return;
+  setupNeed_ = need;
+  setupState = SETUP_RUNNING;
+  setupStep = L"Starting";
+  setupFraction = 0;
+  setupError.clear();
+  toast = Toast();
+  changed();
+  if (startSetup) startSetup(need);
+  else onSetupDone(false, L"Setup isn't available here.");
+}
+
+void App::onSetupProgress(const wstring& step, double fraction) {
+  if (setupState != SETUP_RUNNING) return;
+  setupStep = step;
+  setupFraction = clampd(fraction, 0, 1);
+  changed();
+}
+
+void App::onSetupDone(bool ok, const wstring& error) {
+  const bool still = ((setupNeed_ & TOOL_MPV) && !stream.available()) || ((setupNeed_ & TOOL_YTDLP) && stream.ytdlpPath().empty());
+  if (ok && still) {
+    mlog("setup: finished, but the tools were not found afterwards");
+    ok = false;
+  }
+  if (!ok) {
+    setupState = SETUP_FAILED;
+    setupError = error.empty() ? L"Setup didn't finish." : error;
+    showToast(setupError, L"Try again", [this] { setupStreaming(); }, 10000);
+    changed();
+    return;
+  }
+  setupState = SETUP_IDLE;
+  setupError.clear();
+  warnedNoPlayer_ = warnedNoYtdlp_ = false;
+  showToast(L"Streaming is ready", L"", nullptr, 5000);
+  // carry on where the failed start left off
+  vTried_ = 0;
+  loadedSpec.clear();
+  streamState = SS_IDLE;
+  if (model.s.tab == "files") {
+    filesLoaded_ = false;
+    if (running && !files.empty()) { stream.loadFiles(files); filesLoaded_ = true; streamState = SS_LOADING; }
+  } else if (running) {
+    syncStream(true);
+  }
+  changed();
 }
 
 void App::clearCustom() {

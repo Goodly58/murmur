@@ -205,6 +205,10 @@ void Ui::build() {
         const float ph = L.playerNone ? 72 : std::round(sw * 9 / 16);
         L.player = {sx, y, sw, ph};
         L.watch = {L.player.r() - 8 - 32, L.player.y + 8, 32, 32};
+        if (!L.playerNone && app.toolsMissing() && app.setupState != SETUP_RUNNING) {
+          const float bw = std::min(196.f, sw - 32);
+          L.setup = {L.player.cx() - bw / 2, L.player.y + std::round(ph * 0.42f), bw, 36};
+        }
         y += ph;
         if (!L.playerNone) {
           y += 8;
@@ -322,6 +326,7 @@ void Ui::build() {
       if (!L.playerNone) {
         addSide(H_PLAYER, 0, L.player);
         addSide(H_WATCH, 0, L.watch, app.videoWindow ? L"Close the video window (V)" : L"Watch the video (V)");
+        addSide(H_SETUP, 0, L.setup, app.setupState == SETUP_FAILED ? L"Try the download again" : L"Download mpv and yt-dlp (about 50 MB)");
         addSide(H_VPREV, 0, L.vPrev, L"Previous stream");
         addSide(H_VNEXT, 0, L.vNext, L"Next stream");
         addSide(H_VCLEAR, 0, L.vClear, L"Back to the scene's stream");
@@ -658,9 +663,11 @@ void Ui::activate(const Hit& h) {
     case H_VIDEO: app.toggleStreamOn(); break;
     case H_WATCH: app.toggleVideoWindow(); break;
     case H_PLAYER:
-      if (app.streamState == SS_ERROR) app.retryStream();
+      if (app.toolsMissing()) app.setupStreaming();  // nothing can play until mpv and yt-dlp are here
+      else if (app.streamState == SS_ERROR) app.retryStream();
       else if (!app.running) app.startAll();
       break;
+    case H_SETUP: app.setupStreaming(); break;
     case H_VPREV: case H_FPREV: app.stepStream(-1); break;
     case H_VNEXT: case H_FNEXT: app.stepStream(1); break;
     case H_VCLEAR: app.clearCustom(); break;

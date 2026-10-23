@@ -569,3 +569,67 @@ void testSprint(TestLog& t) {
   t.check("sprint: fresh streams keep the ranking (house, synthwave, lofi house), skip ended ones and no longer pick up baroque radios",
           it != m.end() && it->second.size() == 3 && it->second[0] == "BBBBBBBBBBB" && it->second[1] == "AAAAAAAAAAA" && it->second[2] == "CCCCCCCCCCC");
 }
+
+// ---------------------------------------------------------------------------------------------------
+// The player's Set up button, for a PC without mpv or yt-dlp.
+// ---------------------------------------------------------------------------------------------------
+
+void testSetupUi(TestLog& t) {
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  Rig r;
+  if (!r.init()) { t.check("setup ui: the rig starts", false); return; }
+  Ui& ui = *r.ui;
+  App& app = *r.app;
+  Stream& st = r.st;
+  const Palette P = paletteFor(true);
+  auto col = [](Color c) { return Pix{(int)std::lround(c.r * 255), (int)std::lround(c.g * 255), (int)std::lround(c.b * 255)}; };
+  app.selectScene("focus");
+  app.stopAll();
+  t.check("setup ui: no button while both tools are there", countKind(ui, H_SETUP) == 0);
+
+  st.configure(L"", L"");
+  ui.changed();
+  const Hit b = ui.find(H_SETUP);
+  const R pl = ui.playerRect();
+  t.check("setup ui: with neither tool the player offers the download in its middle",
+          b.k == H_SETUP && b.r.x >= pl.x && b.r.r() <= pl.r() && b.r.y > pl.y + pl.h * 0.3f && b.r.b() < pl.b() - 20 && std::fabs(b.r.cx() - pl.cx()) < 1);
+  vector<uint8_t> px;
+  UINT pw = 0, ph = 0;
+  render(r, 1, px, pw, ph);
+  t.check("setup ui: the button is drawn in the accent colour", closeTo(at(px, pw, (int)(b.r.x + 12), (int)b.r.cy()), col(P.accent), 6), pixStr(at(px, pw, (int)(b.r.x + 12), (int)b.r.cy())));
+  t.check("setup ui: and the player behind it is dimmed to black", closeTo(at(px, pw, (int)(pl.x + 14), (int)(pl.b() - 14)), Pix{0, 0, 0}, 4));
+
+  int asked = 0;
+  app.startSetup = [&](int need) { asked = need; };
+  r.click(H_SETUP);
+  t.check("setup ui: clicking it starts the download for both tools", asked == (TOOL_MPV | TOOL_YTDLP) && app.setupState == SETUP_RUNNING);
+  t.check("setup ui: while it runs the button gives way to a progress bar", ui.find(H_SETUP).k == H_NONE);
+  app.onSetupProgress(L"Downloading mpv", 0.5);
+  render(r, 1, px, pw, ph);
+  {
+    const float bw = std::min(196.f, pl.w - 32), trackY = pl.y + std::round(pl.h * 0.42f) + 28 + 2, x0 = pl.cx() - bw / 2;
+    const Pix filled = at(px, pw, (int)(x0 + bw * 0.25f), (int)trackY), empty = at(px, pw, (int)(x0 + bw * 0.75f), (int)trackY);
+    t.check("setup ui: the bar is filled to the progress and empty beyond it", closeTo(filled, col(P.accent), 6) && !closeTo(empty, col(P.accent), 60), pixStr(filled) + " / " + pixStr(empty));
+  }
+  app.onSetupDone(false, L"Couldn't reach GitHub.");
+  const Hit again = ui.find(H_SETUP);
+  t.check("setup ui: after a failure the button comes back to try again", again.k == H_SETUP && again.tip == L"Try the download again");
+  asked = 0;
+  r.click(H_PLAYER);
+  t.check("setup ui: clicking anywhere on the player does the same", asked == (TOOL_MPV | TOOL_YTDLP) && app.setupState == SETUP_RUNNING);
+  app.onSetupDone(false, L"x");
+
+  st.configure(L"mpv.exe", L"");
+  ui.changed();
+  t.check("setup ui: with mpv but no yt-dlp the stream tab still offers it", ui.find(H_SETUP).k == H_SETUP);
+  app.setTab("files");
+  t.check("setup ui: your own music needs only mpv, so no button there", countKind(ui, H_SETUP) == 0);
+  app.setTab("stream");
+  st.configure(L"", L"");
+  app.selectScene("mask");
+  t.check("setup ui: scenes without a stream have no player and no button", countKind(ui, H_SETUP) == 0 && countKind(ui, H_PLAYER) == 0);
+  app.selectScene("focus");
+  st.configure(L"mpv.exe", L"yt-dlp.exe");
+  ui.changed();
+  t.check("setup ui: once the tools are there the button is gone and the player is as before", countKind(ui, H_SETUP) == 0 && countKind(ui, H_PLAYER) == 1);
+}

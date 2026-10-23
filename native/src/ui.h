@@ -25,7 +25,7 @@ struct Spectrum {
 enum HitKind {
   H_NONE = 0, H_SCENE, H_PLAN, H_PREV, H_PLAY, H_NEXT, H_TILE, H_BAND, H_RESET, H_BEATMODE, H_MUTE, H_MASTER, H_BLEND,
   H_INFO, H_KEYS, H_CHIP, H_CHIPX, H_PADD, H_PUPD, H_TAB, H_LINK, H_VIDEO, H_WATCH, H_PLAYER, H_VPREV, H_VNEXT, H_VCLEAR,
-  H_FILEPICK, H_FPREV, H_FNEXT, H_FCLEAR, H_LINKGO, H_SHEETCLOSE, H_SHEETBACK, H_EVLINK, H_TOASTACT, H_PBAR, H_SIDE, H_MINI
+  H_FILEPICK, H_FPREV, H_FNEXT, H_FCLEAR, H_LINKGO, H_SHEETCLOSE, H_SHEETBACK, H_EVLINK, H_TOASTACT, H_PBAR, H_SIDE, H_MINI, H_SETUP
 };
 
 struct Hit {
@@ -124,7 +124,7 @@ class Ui {
     vector<R> plan;
     vector<string> planIds;
     R prev, play, next;
-    R tabsSeg, tab[2], link, power, watch, player, vbar, vPrev, vTitle, vNext, vClear;
+    R tabsSeg, tab[2], link, power, watch, player, setup, vbar, vPrev, vTitle, vNext, vClear;
     R linkForm, linkInput, linkGo;
     R dropzone, tracks, fbar;
     R blendRow, blendSlider, blendL, blendR;
@@ -151,6 +151,7 @@ class Ui {
   void paintSpectrum();
   void paintSide();
   void paintPlayer();
+  void paintSetup();
   void paintFiles();
   void paintMix();
   void paintOverlays();

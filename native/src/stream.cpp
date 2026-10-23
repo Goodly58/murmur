@@ -4,6 +4,7 @@
 
 #include "json.h"
 #include "net.h"
+#include "setup.h"
 
 namespace {
 wstring quoted(const wstring& s) { return L"\"" + s + L"\""; }
@@ -31,22 +32,35 @@ Stream::~Stream() {
   if (job_) CloseHandle(job_);
 }
 
-bool Stream::configure() {
+vector<wstring> Stream::searchDirs() {
   vector<wstring> dirs = {L"C:\\mpv", L"C:\\Program Files\\mpv", L"C:\\Program Files (x86)\\mpv", L"C:\\tools\\mpv", L"C:\\ProgramData\\chocolatey\\bin"};
   wchar_t la[MAX_PATH];
   if (GetEnvironmentVariableW(L"LOCALAPPDATA", la, MAX_PATH)) dirs.push_back(wstring(la) + L"\\Programs\\mpv");
-  wchar_t env[MAX_PATH];
-  if (GetEnvironmentVariableW(L"MURMUR_MPV", env, MAX_PATH)) mpv_ = env;
-  if (mpv_.empty()) mpv_ = findTool(L"mpv.exe", dirs);
-  if (!mpv_.empty()) {
-    const size_t cut = mpv_.find_last_of(L"\\/");
-    if (cut != wstring::npos) dirs.push_back(mpv_.substr(0, cut));
+  const wstring tools = toolsDir();  // what the player's Set up button downloads
+  if (!tools.empty()) {
+    dirs.push_back(tools + L"\\mpv");
+    dirs.push_back(tools);
   }
-  ytdlp_ = findTool(L"yt-dlp.exe", dirs);
-  return !mpv_.empty();
+  return dirs;
+}
+
+bool Stream::configure() {
+  vector<wstring> dirs = searchDirs();
+  wstring mpv, ytdlp;
+  wchar_t env[MAX_PATH];
+  if (GetEnvironmentVariableW(L"MURMUR_MPV", env, MAX_PATH)) mpv = env;
+  if (mpv.empty()) mpv = findTool(L"mpv.exe", dirs);
+  if (!mpv.empty()) {
+    const size_t cut = mpv.find_last_of(L"\\/");
+    if (cut != wstring::npos) dirs.push_back(mpv.substr(0, cut));
+  }
+  ytdlp = findTool(L"yt-dlp.exe", dirs);
+  configure(mpv, ytdlp);
+  return !mpv.empty();
 }
 
 void Stream::configure(const wstring& mpv, const wstring& ytdlp) {
+  std::lock_guard<std::mutex> g(mu_);  // the player is looked for again after a setup, while the stream may be in use
   mpv_ = mpv;
   ytdlp_ = ytdlp;
 }

@@ -1,6 +1,7 @@
 #include "install.h"
 
 #include "jumplist.h"
+#include "setup.h"
 
 #include <shellapi.h>
 #include <shlobj.h>
@@ -122,6 +123,7 @@ int uninstallApp(bool quiet) {
   DeleteFileW(shortcutPath().c_str());
   clearJumpList();
   RegDeleteKeyW(HKEY_CURRENT_USER, UNINSTALL_KEY);
+  const bool hadTools = removeTools();  // the mpv and yt-dlp that Murmur downloaded itself
   // the running program cannot delete itself: a hidden shell does it a moment after we exit
   wstring cl = L"cmd.exe /c ping 127.0.0.1 -n 3 >nul & del /f /q \"" + target + L"\" & rmdir \"" + dir + L"\"";
   STARTUPINFOW si = {};
@@ -134,6 +136,6 @@ int uninstallApp(bool quiet) {
     CloseHandle(pi.hProcess);
   }
   SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
-  say(quiet, L"Murmur is removed. Your saved mixes stay in %APPDATA%\\Murmur.");
+  say(quiet, wstring(L"Murmur is removed") + (hadTools ? L", with the streaming tools it downloaded" : L"") + L". Your saved mixes stay in %APPDATA%\\Murmur.");
   return 0;
 }

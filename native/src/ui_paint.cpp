@@ -523,6 +523,10 @@ void Ui::paintPlayer() {
     g.popLayer();
   }
   g.strokeRound(p, 12, P.line, 1);
+  if (app.toolsMissing()) {
+    paintSetup();
+    return;
+  }
 
   const float cx = p.cx(), cy = p.cy();
   const StreamState st = app.streamState;
@@ -542,6 +546,29 @@ void Ui::paintPlayer() {
     g.fillRound(w, 8, rgb(0x0c0e11, hot(H_WATCH) ? .85f : .6f));
     g.icon(app.videoWindow ? "i-shrink" : "i-expand", w.cx(), w.cy(), 18, rgb(0xffffff));
   }
+}
+
+// The player on a PC without mpv or yt-dlp: one button that fetches them, and a bar while it does.
+void Ui::paintSetup() {
+  const Palette& P = g.pal;
+  const R p = L.player;
+  const bool running = app.setupState == SETUP_RUNNING, failed = app.setupState == SETUP_FAILED;
+  g.fillRound(p, 12, rgb(0x000000, .62f));  // calms whatever thumbnail is behind
+  g.icon(failed ? "i-alert" : "i-download", p.cx(), p.y + std::round(p.h * 0.26f), 26, failed ? P.danger : rgb(0xffffff, .72f));
+  const float bw = std::min(196.f, p.w - 32), by = p.y + std::round(p.h * 0.42f);
+  if (running) {
+    g.text(app.setupStep, {p.x + 16, by, p.w - 32, 18}, T(12.5f, 500, rgb(0xffffff, .85f), TX_CENTER));
+    const R track = {p.cx() - bw / 2, by + 28, bw, 4};
+    g.fillRound(track, 2, rgb(0xffffff, .2f));
+    g.fillRound({track.x, track.y, std::max(4.f, (float)(bw * app.setupFraction)), 4}, 2, P.accent);
+    return;
+  }
+  const bool hv = hot(H_SETUP);
+  g.fillRound(L.setup, L.setup.h / 2, hv ? mixColor(P.accent, rgb(0xffffff), .07f) : P.accent);
+  g.text(failed ? L"Try again" : L"Set up streaming", L.setup, T(13, 600, P.accentInk, TX_CENTER));
+  TextStyle cap = T(12, 400, failed ? P.danger : rgb(0xffffff, .6f), TX_CENTER);
+  cap.ellipsis = true;
+  g.text(failed ? app.setupError : wstring(L"mpv and yt-dlp, about 50 MB, once"), {p.x + 16, L.setup.b() + 10, p.w - 32, 16}, cap);
 }
 
 void Ui::paintFiles() {

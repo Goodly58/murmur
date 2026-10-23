@@ -19,19 +19,41 @@ Then press the Windows key and type **Murmur**. `--uninstall` removes it again.
 
 <p align="center"><img src="docs/mini.png" alt="Mini player" width="24%">&nbsp;&nbsp;&nbsp;<img src="docs/windows-light.png" alt="Light theme" width="62%"></p>
 
-- **Sprint** (key 2) is for quick work that is not mentally heavy: email, admin, data entry. A light noise bed, 16 Hz beats, 15 minute rounds, and a steady radio (house, synthwave, drum and bass, game study music, lofi house).
 - **N** shrinks it to a mini player that stays on top while you work.
-- **Right-click the taskbar icon** for one-click sessions: Focus 25 · 5, Sprint 15 · 3, Focus 50 · 10, Read, Calm 20, Sleep 60. The same thing from a shortcut: `Murmur.exe --scene sleep --plan t60 --play`.
+- **Right-click the taskbar icon** for one-click sessions, like Sprint 15 · 3.
 - Hover the taskbar icon for previous, play and next.
 - Unplug the headphones and it pauses instead of moving to the speakers.
 
-Streams and your own music play through [mpv](https://mpv.io) (`C:\mpv` or on PATH), YouTube through yt-dlp next to it. The sounds need neither.
+<details>
+<summary>Start a session from a shortcut</summary>
+
+<br>
+
+Add these after `Murmur.exe` (it lives in `%LOCALAPPDATA%\Programs\Murmur`), in a desktop shortcut's Target box or in a terminal:
+
+| Add | What it does |
+|---|---|
+| `--scene sleep` | Picks the scene: `focus` `sprint` `read` `create` `mask` `white` `calm` `sleep` |
+| `--plan t60` | Picks the timing: `p25` 25·5, `p50` 50·10, `p15` 15·3, `t10` `t20` `t30` `t60` `t90` minute timers, `free` no timer |
+| `--play` | Starts playing straight away |
+| `--mini` or `--full` | Opens the mini player or the full window |
+| a YouTube link or music files | Plays them instead of the scene's stream |
+
+For example, a 60 minute sleep timer that starts by itself:
+
+```
+Murmur.exe --scene sleep --plan t60 --play
+```
+
+</details>
+
+Streams and your own music play through [mpv](https://mpv.io), YouTube through yt-dlp. If they're missing, the player shows **Set up streaming**: one click fetches both from their official GitHub releases (about 50 MB, no admin rights) into `%LOCALAPPDATA%\Murmur\tools`, and `--uninstall` removes them again. Already have them on PATH or in `C:\mpv`? Murmur uses those. The sounds need neither.
 
 ### Web app
 
-<p align="center"><img src="docs/bar.png" alt="The custom bar with saved presets" width="60%"></p>
+<p align="center"><a href="https://goodly58.github.io/murmur/"><img src="docs/bar.png" alt="The custom bar with saved presets" width="60%"></a></p>
 
-Chrome or Edge: the install icon in the address bar. After the first visit it works offline.
+**[Open the web app](https://goodly58.github.io/murmur/)** in Chrome or Edge and use the install icon in the address bar. After the first visit it works offline.
 
 ### Run locally
 
@@ -51,6 +73,7 @@ Double-click `Start Murmur.bat`.
 | `ui.cpp` `ui_paint.cpp` `gfx.cpp` | layout and input, drawing, icons from the web sprite |
 | `window.cpp` `jumplist.cpp` | window, mini player, timers, drag and drop, taskbar buttons and jump list, single instance |
 | `stream.cpp` `resolver.cpp` | mpv over a pipe; finds live streams for each scene daily |
+| `setup.cpp` | the Set up streaming button: downloads mpv and yt-dlp, checks their SHA-256, unpacks them |
 | `install.cpp` | per-user install and Start menu entry |
 
 **Web app**: each sound is synthesised once into a looping stereo buffer in a worker, so playback is `BufferSource -> Gain` with no per-sample JavaScript. The audio context sleeps when nothing plays, the YouTube player only exists while a video is wanted, and the spectrum repaints only while the mix changes.

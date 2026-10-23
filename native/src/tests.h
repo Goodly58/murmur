@@ -13,8 +13,11 @@ void testResolver(TestLog& t);
 void testLaunch(TestLog& t);
 void testMini(TestLog& t);
 void testSprint(TestLog& t);
+void testSetup(TestLog& t);
+void testSetupUi(TestLog& t);
 
 int runSelfTests(const string& only = "");
+int runToolsTest(const wstring& dir);
 int runDeviceTest(int seconds);
 int runLoopback(int seconds);
 int runSessionPeaks(int seconds);
