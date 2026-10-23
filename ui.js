@@ -900,7 +900,7 @@ function onKey(e) {
     case 'v': case 'V': S.videoOn = !S.videoOn; syncVideo(running); save(); break;
     case '?': openSheet('#sheetKeys'); break;
     default:
-      if (/^[1-7]$/.test(e.key)) selectScene(SCENES[+e.key - 1].id);
+      if (/^[1-9]$/.test(e.key) && SCENES[+e.key - 1]) selectScene(SCENES[+e.key - 1].id);
   }
 }
 

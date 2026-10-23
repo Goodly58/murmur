@@ -15,6 +15,7 @@ struct Task {
 // Sessions worth one click: the scene, the plan and play, or just the compact player.
 const Task TASKS[] = {
     {L"Focus 25 · 5", L"--scene focus --plan p25 --play"},
+    {L"Sprint 15 · 3", L"--scene sprint --plan p15 --play"},
     {L"Focus 50 · 10", L"--scene focus --plan p50 --play"},
     {L"Read 50 · 10", L"--scene read --plan p50 --play"},
     {L"Calm 20 min", L"--scene calm --plan t20 --play"},

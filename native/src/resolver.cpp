@@ -121,9 +121,9 @@ std::map<string, vector<string>> matchStreams(const vector<StreamEntry>& entries
         for (const string& x : sc.hintExclude) if (l.second.find(normal(widen(x))) != wstring::npos) bad = true;
         if (bad || std::find(ids.begin(), ids.end(), l.first) != ids.end()) continue;
         ids.push_back(l.first);
-        if (ids.size() >= 5) break;
+        if (ids.size() >= 8) break;
       }
-      if (ids.size() >= 5) break;
+      if (ids.size() >= 8) break;
     }
     if (!ids.empty()) out[sc.id] = ids;
   }
@@ -140,7 +140,8 @@ void startResolver(HWND hwnd, UINT msg, const wstring& ytdlp, bool force) {
     if (ytdlp.empty() || (!force && cached && age < 20 * 3600 && age >= 0)) return;
 
     vector<StreamEntry> all;
-    for (const wchar_t* ch : {L"@LofiGirl", L"@ChillhopMusic"}) {
+    // the label and radio channels that carry the streams the scenes ask for
+    for (const wchar_t* ch : {L"@LofiGirl", L"@ChillhopMusic", L"@TheGrandSound", L"@artofminimaltechno", L"@LiquidHourDnB", L"@gamechops", L"@naxosjapan"}) {
       string out;
       int code = 0;
       const wstring cl = L"\"" + ytdlp + L"\" --flat-playlist --playlist-end 60 --no-warnings --print \"%(id)s\t%(live_status)s\t%(title)s\" https://www.youtube.com/" + ch + L"/streams";

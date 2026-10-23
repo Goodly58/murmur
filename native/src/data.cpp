@@ -46,6 +46,7 @@ static vector<PlanDef> buildPlans() {
   vector<PlanDef> p;
   p.push_back({"p25", L"25·5", cycle(25, 5, 4), 0});
   p.push_back({"p50", L"50·10", cycle(50, 10, 3), 0});
+  p.push_back({"p15", L"15·3", cycle(15, 3, 4), 0});
   p.push_back({"free", L"∞", {}, 0});
   auto timer = [](int min) { return vector<PhaseDef>{{PH_TIMER, (int64_t)min * 60000}}; };
   p.push_back({"t10", L"10m", timer(10), 30000});
@@ -84,6 +85,15 @@ static vector<SceneDef> buildScenes() {
   add("focus", L"Focus", "i-target", true, mk({{"brown", 45}, {"pink", 18}}), bandIndex("beta"), 22, true,
       {"p25", "p50", "free"}, {"rFZHOHl-L8A", "5yx6BWlEVcY", "3PFJ9SETS4M", "0muHFBSiybw", "1Tl2FtV06qo"},
       {"lofi hip hop radio", "chillhop radio", "lofi house", "summer lofi", "asian lofi"}, {"sleep", "christmas", "halloween", "sad"});
+  // Sprint: quick, intense work that is not mentally heavy (email, admin, data entry, repetitive sets). A light
+  // noise bed under music with a steady pulse, in the order of the ranking: house and techno, synthwave, liquid
+  // drum and bass, video-game study radio, baroque. Beta beats (16 Hz) are the band that improved vigilance in
+  // Lane et al. 1998. Short 15 minute rounds keep the pace up.
+  add("sprint", L"Sprint", "i-bolt", true, mk({{"pink", 14}, {"brown", 8}}), bandIndex("beta"), 24, true,
+      {"p15", "p25", "free"}, {"Ihm9OQWmibA", "UYOb37KRFqk", "4xDzrJKXOOY", "g6yxzlbV2gI", "Tb2PjZ54jG0", "iODXbOA6T3o"},
+      {"deep house smooth background study", "minimal techno deep radio", "synthwave radio", "liquid drum bass radio",
+       "video game study lounge", "baroque beats radio"},
+      {"sleep", "christmas", "halloween"});
   add("read", L"Read", "i-book", true, mk({{"pink", 36}, {"rain", 16}}), bandIndex("alpha"), 20, false,
       {"p50", "p25", "free"}, {"jXAEIWcGXwE", "N0snMcR6aaA", "E_XmwjgRLz8"},
       {"classical music radio", "piano radio", "guitar radio"}, {});

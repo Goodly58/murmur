@@ -246,7 +246,7 @@ void Ui::paintRail() {
   const Model& m = app.model;
   g.fill({231, L.rail.y, 1, L.rail.h}, P.line);
   const auto& stock = stockScenes();
-  for (int i = 0; i < 7; i++) {
+  for (int i = 0; i < NSCENES; i++) {
     const R r = L.scene[i];
     if (!visible({0, r.y, 232, r.h})) continue;
     const bool cur = m.s.scene == stock[(size_t)i].id, hv = hot(H_SCENE, i);
@@ -747,7 +747,7 @@ void Ui::paintSheet() {
     struct Row { std::vector<const wchar_t*> keys; std::vector<const char*> icons; };
     const vector<Row> rows = {
         {{L"Space"}, {"i-play"}}, {{L"←", L"→"}, {"i-prev", "i-next"}}, {{L"↑", L"↓"}, {"i-vol"}}, {{L"M"}, {"i-mute"}},
-        {{L"1", L"–", L"7"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"V"}, {"i-video"}}, {{L"N"}, {"i-mini"}}, {{L"Ctrl", L"V"}, {"i-link"}}};
+        {{L"1", L"–", L"8"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"V"}, {"i-video"}}, {{L"N"}, {"i-mini"}}, {{L"Ctrl", L"V"}, {"i-link"}}};
     float y = s.y + 56 + 8;
     for (const Row& r : rows) {
       float x = s.x + 20;
@@ -781,7 +781,7 @@ void Ui::paintMini() {
   const auto& stock = stockScenes();
   paintRing();
   paintTransport();
-  for (int i = 0; i < 7; i++) {
+  for (int i = 0; i < NSCENES; i++) {
     const R r = L.scene[i];
     if (!visible(r)) continue;
     const bool cur = m.s.scene == stock[(size_t)i].id, hv = hot(H_SCENE, i);

@@ -4,6 +4,7 @@
 
 constexpr int NCH = 9;
 constexpr int MAX_PRESETS = 24;
+constexpr int NSCENES = 8;  // stock scenes: the rail, the mini player's row and the digit keys follow this
 
 struct ChannelDef {
   const char* id;

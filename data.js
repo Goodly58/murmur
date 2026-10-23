@@ -36,6 +36,7 @@ function cycle(focus, rest, rounds) {
 export const PLANS = {
   p25:  { label: '25·5',  phases: cycle(25, 5, 4) },
   p50:  { label: '50·10', phases: cycle(50, 10, 3) },
+  p15:  { label: '15·3',  phases: cycle(15, 3, 4) },
   free: { label: '∞',     phases: null },
   t10:  { label: '10m', phases: [{ kind: 'timer', ms: 10 * MIN }], fadeMs: 30000 },
   t20:  { label: '20m', phases: [{ kind: 'timer', ms: 20 * MIN }], fadeMs: 30000 },
@@ -54,6 +55,12 @@ export const SCENES = [
   { id: 'focus',  name: 'Focus',  icon: 'i-target', study: true, mix: { brown: 45, pink: 18 },
     beat: { band: 'beta', level: 22 }, plans: ['p25', 'p50', 'free'],
     videos: ['rFZHOHl-L8A', '5yx6BWlEVcY', '3PFJ9SETS4M', '0muHFBSiybw', '1Tl2FtV06qo'] },
+  /* Sprint: quick, intense work that is not mentally heavy (email, admin, data entry, repetitive sets). A light noise
+     bed under music with a steady pulse, ranked: house and techno, synthwave, liquid drum and bass, game study
+     radio, baroque. Beta beats (16 Hz) are the band that improved vigilance in Lane et al. 1998. */
+  { id: 'sprint', name: 'Sprint', icon: 'i-bolt', study: true, mix: { pink: 14, brown: 8 },
+    beat: { band: 'beta', level: 24 }, plans: ['p15', 'p25', 'free'],
+    videos: ['Ihm9OQWmibA', 'UYOb37KRFqk', '4xDzrJKXOOY', 'g6yxzlbV2gI', 'Tb2PjZ54jG0', 'iODXbOA6T3o'] },
   { id: 'read',   name: 'Read',   icon: 'i-book', study: true, mix: { pink: 36, rain: 16 },
     beat: null, plans: ['p50', 'p25', 'free'],
     videos: ['jXAEIWcGXwE', 'N0snMcR6aaA', 'E_XmwjgRLz8'] },

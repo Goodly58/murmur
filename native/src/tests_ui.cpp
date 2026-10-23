@@ -34,6 +34,12 @@ bool closeTo(Pix a, Pix b, int tol) {
 
 string pixStr(Pix p) { return std::to_string(p.r) + "," + std::to_string(p.g) + "," + std::to_string(p.b); }
 
+int sceneIdx(const string& id) {
+  const auto& s = stockScenes();
+  for (size_t i = 0; i < s.size(); i++) if (s[i].id == id) return (int)i;
+  return -1;
+}
+
 int countKind(Ui& ui, HitKind k) {
   int n = 0;
   for (auto& h : ui.hits()) if (h.k == k) n++;
@@ -50,7 +56,7 @@ void testUi(TestLog& t) {
   App& app = *r.app;
 
   // ---- layout
-  t.check("ui: seven scenes, ten tiles, five bands", countKind(ui, H_SCENE) == 7 && countKind(ui, H_TILE) == 10 && countKind(ui, H_BAND) == 5);
+  t.check("ui: every scene, ten tiles, five bands", countKind(ui, H_SCENE) == NSCENES && countKind(ui, H_TILE) == 10 && countKind(ui, H_BAND) == 5);
   t.check("ui: Focus offers three plans", countKind(ui, H_PLAN) == 3);
   t.check("ui: the three beat modes and the volume controls", countKind(ui, H_BEATMODE) == 3 && countKind(ui, H_MUTE) == 1 && countKind(ui, H_MASTER) == 1);
   t.check("ui: nothing to update or reset yet", countKind(ui, H_PUPD) == 0 && countKind(ui, H_RESET) == 0);
@@ -65,7 +71,7 @@ void testUi(TestLog& t) {
   ui.setSize(1180, 760);
 
   // ---- transport and scenes by pointer
-  r.click(H_SCENE, 2);
+  r.click(H_SCENE, sceneIdx("create"));
   t.check("ui: clicking a scene starts it", app.model.s.scene == "create" && app.running);
   r.click(H_PLAY);
   t.check("ui: the play button pauses", !app.running);
@@ -201,7 +207,7 @@ void testUi(TestLog& t) {
   t.check("ui: Space pauses", !app.running);
   ui.key(VK_SPACE, false, false);
   t.check("ui: and plays", app.running);
-  ui.key('3', false, false);
+  ui.key((int)('1' + sceneIdx("create")), false, false);
   t.check("ui: a digit picks the scene", app.model.s.scene == "create");
   const int mode = app.model.s.beatsMode;
   ui.key('B', false, false);
@@ -450,8 +456,8 @@ void testMini(TestLog& t) {
 
   ui.setMini(true);
   ui.setSize(320, 484);
-  t.check("mini: seven scenes, transport, mute, volume and the way back",
-          countKind(ui, H_SCENE) == 7 && countKind(ui, H_PLAY) == 1 && countKind(ui, H_PREV) == 1 && countKind(ui, H_NEXT) == 1 && countKind(ui, H_MUTE) == 1 &&
+  t.check("mini: every scene, transport, mute, volume and the way back",
+          countKind(ui, H_SCENE) == NSCENES && countKind(ui, H_PLAY) == 1 && countKind(ui, H_PREV) == 1 && countKind(ui, H_NEXT) == 1 && countKind(ui, H_MUTE) == 1 &&
               countKind(ui, H_MASTER) == 1 && countKind(ui, H_MINI) == 1);
   t.check("mini: no mix tiles, bands, plans or presets", countKind(ui, H_TILE) == 0 && countKind(ui, H_BAND) == 0 && countKind(ui, H_PLAN) == 0 && countKind(ui, H_CHIP) == 0);
   bool inside = true;
@@ -461,7 +467,7 @@ void testMini(TestLog& t) {
   t.check("mini: the ring and transport sit above the scene row and the spectrum strip",
           ui.ringRect().b() < play.r.y && play.r.b() < ui.find(H_SCENE, 0).r.y && ui.find(H_SCENE, 0).r.b() < ui.specRect().y && ui.specRect().b() <= 485);
 
-  r.click(H_SCENE, 3);
+  r.click(H_SCENE, sceneIdx("mask"));
   t.check("mini: a scene button starts that scene", app.model.s.scene == "mask" && app.running);
   r.click(H_PLAY);
   t.check("mini: the play button pauses", !app.running);
@@ -502,5 +508,49 @@ void testMini(TestLog& t) {
 
   ui.setMini(false);
   ui.setSize(1180, 760);
-  t.check("mini: leaving it brings the full layout back", countKind(ui, H_TILE) == 10 && countKind(ui, H_SCENE) == 7 && ui.find(H_MINI).k == H_MINI);
+  t.check("mini: leaving it brings the full layout back", countKind(ui, H_TILE) == 10 && countKind(ui, H_SCENE) == NSCENES && ui.find(H_MINI).k == H_MINI);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The Sprint scene: fast, intense work that is not mentally heavy.
+// ---------------------------------------------------------------------------------------------------
+
+void testSprint(TestLog& t) {
+  const SceneDef* sp = findStock("sprint");
+  t.check("sprint: a stock scene, second in the rail", sp && stockScenes()[1].id == "sprint" && (int)stockScenes().size() == NSCENES);
+  if (!sp) return;
+  t.check("sprint: a light noise bed and beta beats", sp->study && sp->mix[(size_t)channelIndex("pink")] == 14 && sp->mix[(size_t)channelIndex("brown")] == 8 &&
+                                                         sp->beat.on && sp->beat.band == bandIndex("beta") && sp->beat.level == 24);
+  t.check("sprint: 15 minute rounds first, then 25, then open", sp->plans == vector<string>({"p15", "p25", "free"}));
+  const PlanDef* p = findPlan("p15");
+  t.check("sprint: four 15 minute rounds with 3 minute breaks",
+          p && p->phases.size() == 7 && p->phases[0].kind == PH_FOCUS && p->phases[0].ms == 15 * 60000 && p->phases[1].kind == PH_BREAK && p->phases[1].ms == 3 * 60000);
+  bool ids = sp->streams.size() == 6;
+  for (auto& id : sp->streams) if (id.size() != 11) ids = false;
+  t.check("sprint: six streams, ranked: house, techno, synthwave, drum and bass, game study radio, baroque", ids && sp->streams[0] == "Ihm9OQWmibA" && sp->streams[2] == "4xDzrJKXOOY");
+
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  Rig r;
+  if (!r.init()) { t.check("sprint: the rig starts", false); return; }
+  App& app = *r.app;
+  r.ui->key('2', false, false);
+  t.check("sprint: the 2 key starts it on the 15 minute plan", app.model.s.scene == "sprint" && app.model.planId() == "p15" && app.running && app.session.planId() == "p15");
+  t.check("sprint: it begins with the steadiest stream", app.wantedSpec() == "Ihm9OQWmibA", app.wantedSpec());
+  r.advance(1000);
+  const auto e = app.effective();
+  t.check("sprint: beta beats at 16 Hz are on", e.beat.mode == 1 && e.beat.hz == 16 && e.beat.level == 24);
+  r.advance(15 * 60000);
+  t.check("sprint: after 15 minutes comes the short break", app.session.snapshot().kind == PH_BREAK && app.effective().levels == BREAK_MIX);
+  t.check("sprint: it counts as study time", app.model.todayMinutes() > 14, std::to_string(app.model.todayMinutes()));
+
+  vector<StreamEntry> entries = {
+      {"AAAAAAAAAAA", "is_live", L"synthwave radio - beats to chill/game to"},
+      {"BBBBBBBBBBB", "is_live", L"Deep House \u2014 Smooth Background Study Music \u2014 24/7 Live Radio"},
+      {"CCCCCCCCCCC", "is_live", L"Baroque Beats Radio 24/7"},
+      {"DDDDDDDDDDD", "was_live", L"Liquid Drum & Bass Radio 24/7"},
+  };
+  const auto m = matchStreams(entries);
+  const auto it = m.find("sprint");
+  t.check("sprint: fresh streams keep the ranking (house, synthwave, baroque) and skip ended ones",
+          it != m.end() && it->second.size() == 3 && it->second[0] == "BBBBBBBBBBB" && it->second[1] == "AAAAAAAAAAA" && it->second[2] == "CCCCCCCCCCC");
 }

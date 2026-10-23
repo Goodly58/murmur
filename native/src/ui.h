@@ -119,7 +119,7 @@ class Ui {
     R pClip, pAdd, pUpd;
     vector<R> chip;
     vector<float> chipText;   // width available for each chip's name
-    R scene[7];
+    R scene[NSCENES];
     R planSeg;
     vector<R> plan;
     vector<string> planIds;

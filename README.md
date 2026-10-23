@@ -4,7 +4,7 @@
 
 <p align="center"><img src="docs/windows.png" alt="Murmur for Windows" width="100%"></p>
 
-<p align="center"><img src="docs/glance.png" alt="Seven scenes. Custom presets, live streams, spectrum, automatic breaks, offline." width="100%"></p>
+<p align="center"><img src="docs/glance.png" alt="Eight scenes. Custom presets, live streams, spectrum, automatic breaks, offline." width="100%"></p>
 
 ### Windows app
 
@@ -19,8 +19,9 @@ Then press the Windows key and type **Murmur**. `--uninstall` removes it again.
 
 <p align="center"><img src="docs/mini.png" alt="Mini player" width="24%">&nbsp;&nbsp;&nbsp;<img src="docs/windows-light.png" alt="Light theme" width="62%"></p>
 
+- **Sprint** (key 2) is for quick work that is not mentally heavy: email, admin, data entry. A light noise bed, 16 Hz beats, 15 minute rounds, and a steady instrumental radio (house, synthwave, drum and bass, game study music, baroque).
 - **N** shrinks it to a mini player that stays on top while you work.
-- **Right-click the taskbar icon** for one-click sessions: Focus 25 · 5, Focus 50 · 10, Read, Calm 20, Sleep 60. The same thing from a shortcut: `Murmur.exe --scene sleep --plan t60 --play`.
+- **Right-click the taskbar icon** for one-click sessions: Focus 25 · 5, Sprint 15 · 3, Focus 50 · 10, Read, Calm 20, Sleep 60. The same thing from a shortcut: `Murmur.exe --scene sleep --plan t60 --play`.
 - Hover the taskbar icon for previous, play and next.
 - Unplug the headphones and it pauses instead of moving to the speakers.
 

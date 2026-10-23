@@ -142,7 +142,7 @@ void Ui::build() {
 
   // ---- scenes and stats
   const auto& stock = stockScenes();
-  for (int i = 0; i < 7; i++) L.scene[i] = {12, by + 16 + i * 46.f, 207, 44};
+  for (int i = 0; i < NSCENES; i++) L.scene[i] = {12, by + 16 + i * 46.f, 207, 44};
   const float statsH = 91;
   L.stats = {12, H - 16 - statsH, 207, statsH};
 
@@ -300,7 +300,7 @@ void Ui::build() {
   }
   if (upd) add(H_PUPD, 0, L.pUpd, L"Update this preset with the current mix");
 
-  for (int i = 0; i < 7; i++) add(H_SCENE, i, L.scene[i], stock[(size_t)i].name + L" (" + std::to_wstring(i + 1) + L")");
+  for (int i = 0; i < NSCENES; i++) add(H_SCENE, i, L.scene[i], stock[(size_t)i].name + L" (" + std::to_wstring(i + 1) + L")");
   for (size_t i = 0; i < L.plan.size(); i++) add(H_PLAN, (int)i, L.plan[i]);
   add(H_PREV, 0, L.prev, L"Restart phase (←)");
   add(H_PLAY, 0, L.play, L"Play / pause (Space)");
@@ -576,7 +576,7 @@ bool Ui::key(int vk, bool ctrl, bool shift) {
     case VK_OEM_2: if (shift) { openSheet(2); return true; } return false;
     default: break;
   }
-  if (vk >= '1' && vk <= '7') { app.selectScene(stockScenes()[(size_t)(vk - '1')].id); return true; }
+  if (vk >= '1' && vk < '1' + NSCENES) { app.selectScene(stockScenes()[(size_t)(vk - '1')].id); return true; }
   return false;
 }
 
@@ -718,8 +718,8 @@ void Ui::buildMini() {
   L.next = {L.play.r() + 18, ty - 20, 40, 40};
   L.transport = {L.prev.x, L.play.y, L.next.r() - L.prev.x, playD};
   const float sy = L.play.b() + 16;
-  const float x0 = (W - 288) / 2;
-  for (int i = 0; i < 7; i++) L.scene[i] = {x0 + i * 42, sy, 36, 36};
+  const float bw = 34, gap = 4, x0 = (W - (NSCENES * bw + (NSCENES - 1) * gap)) / 2;
+  for (int i = 0; i < NSCENES; i++) L.scene[i] = {x0 + i * (bw + gap), sy, bw, 36};
   const float vy = sy + 36 + 12;
   L.mute = {14, vy - 4, 28, 28};
   L.master = {50, vy, W - 50 - 18, 20};
@@ -730,7 +730,7 @@ void Ui::buildMini() {
   add(H_MINI, 0, L.miniBtn, L"Full window (N)");
   add(H_MUTE, 0, L.mute, L"Mute (M)");
   add(H_MASTER, 0, L.master.inset(0, -4), L"Volume");
-  for (int i = 0; i < 7; i++) add(H_SCENE, i, L.scene[i], stock[(size_t)i].name + L" (" + std::to_wstring(i + 1) + L")");
+  for (int i = 0; i < NSCENES; i++) add(H_SCENE, i, L.scene[i], stock[(size_t)i].name + L" (" + std::to_wstring(i + 1) + L")");
   add(H_PREV, 0, L.prev, L"Restart phase (\u2190)");
   add(H_PLAY, 0, L.play, L"Play / pause (Space)");
   if (snap.cycle && !snap.done) add(H_NEXT, 0, L.next, L"Skip phase (\u2192)");

@@ -423,7 +423,7 @@ void testModel(TestLog& t) {
   m.nowFn = [&] { return fakeNow; };
 
   t.check("model: starts on Focus with its default plan and mix", m.s.scene == "focus" && m.planId() == "p25" && m.mixOf()[(size_t)channelIndex("brown")] == 45);
-  t.check("model: seven stock scenes", m.scenes().size() == 7);
+  t.check("model: eight stock scenes", m.scenes().size() == (size_t)NSCENES && NSCENES == 8);
   t.check("model: nothing modified yet", !m.mixModified() && !m.presetDirty());
 
   // editing
@@ -824,6 +824,7 @@ int runSelfTests(const string& only) {
   if (want("ui")) testUi(t);
   if (want("launch")) testLaunch(t);
   if (want("mini")) testMini(t);
+  if (want("sprint")) testSprint(t);
   if (want("dsp")) testDsp(t);
   if (want("audio")) testAudio(t);
   std::printf("\n%s: %d passed, %d failed\n", t.failed ? "FAILED" : "ALL PASSED", t.passed, t.failed);
