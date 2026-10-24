@@ -199,6 +199,7 @@ int runLostTest() {
 // scratch folder, with MURMUR_TOOLS pointed there so nothing else on the PC is touched, then starts both once.
 int runToolsTest(const wstring& dir) {
   SetEnvironmentVariableW(L"MURMUR_TOOLS", dir.c_str());
+  SetEnvironmentVariableW(L"MURMUR_DATA", dir.c_str());  // its log lines stay in the scratch folder too
   std::printf("tools folder: %s\n", narrow(toolsDir()).c_str());
   wstring lastStep;
   int lastPct = -10;
@@ -232,6 +233,43 @@ int runToolsTest(const wstring& dir) {
   std::printf("  working folder cleaned up: %s\n", leftover ? "NO" : "yes");
   ok = ok && !leftover;
   std::printf("%s after %.0f s\n", ok ? "TOOLS TEST OK" : "TOOLS TEST FAILED", secs);
+  return ok ? 0 : 1;
+}
+
+// `Murmur.exe --update-test <folder>`: the daily yt-dlp update against the real GitHub. The folder must already hold an
+// older yt-dlp.exe; it is both the tools folder and the data folder for the run, so nothing else on the PC is touched.
+int runUpdateTest(const wstring& dir) {
+  SetEnvironmentVariableW(L"MURMUR_TOOLS", dir.c_str());
+  SetEnvironmentVariableW(L"MURMUR_DATA", dir.c_str());
+  const wstring exe = toolsDir() + L"\\yt-dlp.exe";
+  auto version = [&]() -> string {
+    string out;
+    int code = -1;
+    if (GetFileAttributesW(exe.c_str()) == INVALID_FILE_ATTRIBUTES) return "MISSING";
+    if (!runCapture(L"\"" + exe + L"\" --version", out, 30000, &code) || code != 0) return "does not run";
+    return out.substr(0, out.find_first_of("\r\n"));
+  };
+  const string before = version();
+  std::printf("yt-dlp before: %s\n", before.c_str());
+  const auto t0 = std::chrono::steady_clock::now();
+  const bool asked = refreshYtdlp(exe, realToolIO(), wallMs() / 1000, true);
+  const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  const string after = version();
+  std::printf("yt-dlp after:  %s   (asked to update: %s, %.1f s)\n", after.c_str(), asked ? "yes" : "no", secs);
+  const bool stamped = GetFileAttributesW((dir + L"\\yt-dlp.checked").c_str()) != INVALID_FILE_ATTRIBUTES;
+  std::printf("  check remembered: %s\n", stamped ? "yes" : "NO");
+  string log;
+  if (FILE* f = _wfopen((dir + L"\\murmur.log").c_str(), L"rb")) {
+    char b[1024];
+    size_t n;
+    while ((n = fread(b, 1, sizeof b, f)) > 0) log.append(b, n);
+    fclose(f);
+  }
+  while (!log.empty() && (log.back() == '\n' || log.back() == '\r')) log.pop_back();
+  const size_t nl = log.rfind('\n');
+  std::printf("  log: %s\n", log.substr(nl == string::npos ? 0 : nl + 1).c_str());
+  const bool ok = asked && stamped && after != "MISSING" && after != "does not run";
+  std::printf("%s\n", ok ? "UPDATE TEST OK" : "UPDATE TEST FAILED");
   return ok ? 0 : 1;
 }
 

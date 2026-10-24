@@ -2,6 +2,7 @@
 // against a fake GitHub, and the app around it (the toast, the retry, picking the stream up again).
 #include <shlobj.h>
 
+#include "net.h"
 #include "rig.h"
 #include "setup.h"
 #include "tests.h"
@@ -129,8 +130,50 @@ bool climbs(const Run& r) {
 
 }  // namespace
 
+// The daily `yt-dlp -U` for the yt-dlp that Murmur downloaded, against a stand-in for the program.
+static void testYtdlpUpdate(TestLog& t) {
+  const int64_t t0 = 1800000000;
+  vector<wstring> ran;
+  int exitCode = 0;
+  bool finishes = true;
+  ToolIO io;
+  io.run = [&](const wstring& cmdline, int, string& out, int* code) {
+    ran.push_back(cmdline);
+    out = "Current version: stable@2026.10.20 from yt-dlp/yt-dlp\nyt-dlp is up to date (stable@2026.10.20 from yt-dlp/yt-dlp)\n";
+    *code = exitCode;
+    return finishes;
+  };
+  {
+    ScratchTools tools;
+    const wstring mine = tools.dir + L"\\yt-dlp.exe";
+    const bool first = refreshYtdlp(mine, io, t0);
+    t.check("update: the yt-dlp Murmur downloaded is asked to update itself", first && ran.size() == 1 && ran[0] == L"\"" + mine + L"\" -U", ran.empty() ? "" : narrow(ran[0]));
+    t.check("update: what it said goes in the log", slurp(appDataDir() + L"\\murmur.log").find("yt-dlp update: yt-dlp is up to date (stable@2026.10.20 from yt-dlp/yt-dlp) (exit 0)") != string::npos);
+    t.check("update: a good check is remembered, so it is not repeated within the day", !refreshYtdlp(mine, io, t0 + 3600) && ran.size() == 1);
+    t.check("update: after 20 hours it checks again", refreshYtdlp(mine, io, t0 + 21 * 3600) && ran.size() == 2);
+    t.check("update: when every stream failed it checks at once", refreshYtdlp(mine, io, t0 + 21 * 3600 + 60, true) && ran.size() == 3);
+    t.check("update: a clock set back does not stop it checking", refreshYtdlp(mine, io, t0) && ran.size() == 4);
+  }
+  ran.clear();
+  {
+    ScratchTools tools;
+    const wstring mine = tools.dir + L"\\yt-dlp.exe";
+    exitCode = 1;
+    t.check("update: a failed update is tried again next time", refreshYtdlp(mine, io, t0) && refreshYtdlp(mine, io, t0 + 60) && ran.size() == 2);
+    exitCode = 0;
+    finishes = false;
+    ran.clear();
+    t.check("update: so is one that never finishes", refreshYtdlp(mine, io, t0 + 120) && refreshYtdlp(mine, io, t0 + 180) && ran.size() == 2);
+    finishes = true;
+    ran.clear();
+    t.check("update: a yt-dlp the user installed is never touched",
+            !refreshYtdlp(L"C:\\mpv\\yt-dlp.exe", io, t0) && !refreshYtdlp(tools.dir + L"-other\\yt-dlp.exe", io, t0) && !refreshYtdlp(L"", io, t0) && ran.empty());
+  }
+}
+
 void testSetup(TestLog& t) {
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  testYtdlpUpdate(t);
 
   // ---- the small pieces
   t.check("setup: sha-256 of abc", sha256Hex("abc", 3) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");

@@ -47,7 +47,7 @@ Murmur.exe --scene sleep --plan t60 --play
 
 </details>
 
-Streams and your own music play through [mpv](https://mpv.io), YouTube through yt-dlp. If they're missing, the player shows **Set up streaming**: one click fetches both from their official GitHub releases (about 50 MB, no admin rights) into `%LOCALAPPDATA%\Murmur\tools`, and `--uninstall` removes them again. Already have them on PATH or in `C:\mpv`? Murmur uses those. The sounds need neither.
+Streams and your own music play through [mpv](https://mpv.io), YouTube through yt-dlp. If they're missing, the player shows **Set up streaming**: one click fetches both from their official GitHub releases (about 50 MB, no admin rights) into `%LOCALAPPDATA%\Murmur\tools`, and `--uninstall` removes them again. Murmur keeps that yt-dlp up to date, since YouTube changes often. Already have them on PATH or in `C:\mpv`? Murmur uses those and leaves them alone. The sounds need neither.
 
 ### Web app
 
@@ -73,7 +73,7 @@ Double-click `Start Murmur.bat`.
 | `ui.cpp` `ui_paint.cpp` `gfx.cpp` | layout and input, drawing, icons from the web sprite |
 | `window.cpp` `jumplist.cpp` | window, mini player, timers, drag and drop, taskbar buttons and jump list, single instance |
 | `stream.cpp` `resolver.cpp` | mpv over a pipe; finds live streams for each scene daily |
-| `setup.cpp` | the Set up streaming button: downloads mpv and yt-dlp, checks their SHA-256, unpacks them |
+| `setup.cpp` | the Set up streaming button: downloads mpv and yt-dlp, checks their SHA-256, unpacks them; keeps that yt-dlp updated |
 | `install.cpp` | per-user install and Start menu entry |
 
 **Web app**: each sound is synthesised once into a looping stereo buffer in a worker, so playback is `BufferSource -> Gain` with no per-sample JavaScript. The audio context sleeps when nothing plays, the YouTube player only exists while a video is wanted, and the spectrum repaints only while the mix changes.

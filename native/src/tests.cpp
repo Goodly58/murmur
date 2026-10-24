@@ -7,9 +7,12 @@
 #include "fft.h"
 #include "json.h"
 #include <psapi.h>
+#include <shlobj.h>
 
 #include "model.h"
+#include "net.h"
 #include "session.h"
+#include "setup.h"
 #include "stream.h"
 
 void TestLog::check(const string& name, bool ok, const string& detail) {
@@ -810,14 +813,62 @@ void testStreamLive(TestLog& t) {
   t.check("stream: shutdown ends mpv", gone);
 }
 
+// The self-tests keep their data (the log, the stream cache) in a scratch folder, so running them never writes
+// into the real %APPDATA%\Murmur.
+void testLog(TestLog& t) {
+  wchar_t roaming[MAX_PATH] = {};
+  SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, roaming);
+  const wstring real = wstring(roaming) + L"\\Murmur";
+  const wstring dir = appDataDir();
+  t.check("log: the self-tests use a scratch data folder, not the real one", !dir.empty() && _wcsicmp(dir.c_str(), real.c_str()) != 0, narrow(dir));
+
+  mlog("selftest marker %d", 4242);
+  string text;
+  if (FILE* f = _wfopen((dir + L"\\murmur.log").c_str(), L"rb")) {
+    char b[4096];
+    size_t n;
+    while ((n = fread(b, 1, sizeof b, f)) > 0) text.append(b, n);
+    fclose(f);
+  }
+  const size_t at = text.find(" selftest marker 4242");
+  const size_t nl = at == string::npos ? string::npos : text.rfind('\n', at);
+  const size_t start = nl == string::npos ? 0 : nl + 1;
+  // "2026-10-24 17:28:04 selftest marker 4242": the date comes first, then the time
+  bool dated = at != string::npos && at - start == 19;
+  for (size_t i = 0; dated && i < 19; i++) {
+    const char c = text[start + i];
+    dated = (i == 4 || i == 7) ? c == '-' : i == 10 ? c == ' ' : (i == 13 || i == 16) ? c == ':' : (c >= '0' && c <= '9');
+  }
+  t.check("log: a line starts with the date and the time", dated, text.substr(start, 40));
+}
+
+// While the self-tests run, MURMUR_DATA points at a scratch folder: nothing they do may reach the real log.
+struct ScratchData {
+  wstring dir;
+  ScratchData() {
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    dir = wstring(tmp) + L"murmur-selftest-data-" + std::to_wstring(GetCurrentProcessId());
+    removeTree(dir);
+    SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
+    SetEnvironmentVariableW(L"MURMUR_DATA", dir.c_str());
+  }
+  ~ScratchData() {
+    SetEnvironmentVariableW(L"MURMUR_DATA", nullptr);
+    removeTree(dir);
+  }
+};
+
 }  // namespace
 
 int runSelfTests(const string& only) {
+  ScratchData scratch;
   TestLog t;
   t.verbose = true;
   auto want = [&](const char* n) { return only.empty() || only == n; };
   if (only == "stream-live") { testStreamLive(t); std::printf("\n%s: %d passed, %d failed\n", t.failed ? "FAILED" : "ALL PASSED", t.passed, t.failed); return t.failed ? 1 : 0; }
   if (want("json")) testJson(t);
+  if (want("log")) testLog(t);
   if (want("model")) testModel(t);
   if (want("session")) testSession(t);
   if (want("app")) testApp(t);

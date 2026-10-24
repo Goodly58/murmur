@@ -3,6 +3,7 @@
 #include "data.h"
 #include "json.h"
 #include "net.h"
+#include "setup.h"
 
 namespace {
 
@@ -167,6 +168,7 @@ void startResolver(HWND hwnd, UINT msg, const wstring& ytdlp, bool force) {
     const bool cached = loadCache(fresh, &at);
     const int64_t age = wallMs() / 1000 - at;
     if (cached) PostMessageW(hwnd, msg, 0, (LPARAM) new std::map<string, vector<string>>(fresh));
+    refreshYtdlp(ytdlp, realToolIO(), wallMs() / 1000, force);  // a yt-dlp that Setup downloaded updates itself; anyone else's is left alone
     if (ytdlp.empty() || (!force && cached && age < 20 * 3600 && age >= 0)) return;
 
     vector<StreamEntry> all;

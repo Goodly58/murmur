@@ -160,6 +160,12 @@ wstring findTool(const wchar_t* exeName, const vector<wstring>& extraDirs) {
 }
 
 wstring appDataDir() {
+  wchar_t over[MAX_PATH];
+  const DWORD on = GetEnvironmentVariableW(L"MURMUR_DATA", over, MAX_PATH);  // the self-tests point this at a scratch folder
+  if (on > 0 && on < MAX_PATH) {
+    SHCreateDirectoryExW(nullptr, over, nullptr);
+    return over;
+  }
   wchar_t buf[MAX_PATH] = {};
   if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, buf))) return L".";
   wstring d = wstring(buf) + L"\\Murmur";
@@ -180,7 +186,7 @@ void mlog(const char* fmt, ...) {
   if (!f) return;
   SYSTEMTIME t;
   GetLocalTime(&t);
-  fprintf(f, "%02d:%02d:%02d ", t.wHour, t.wMinute, t.wSecond);
+  fprintf(f, "%04d-%02d-%02d %02d:%02d:%02d ", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
   va_list ap;
   va_start(ap, fmt);
   vfprintf(f, fmt, ap);

@@ -15,4 +15,4 @@ bool runCapture(const wstring& cmdline, string& out, int timeoutMs, int* exitCod
 // Finds an executable on PATH or in a few usual places ("" if not found).
 wstring findTool(const wchar_t* exeName, const vector<wstring>& extraDirs);
 
-wstring appDataDir();   // %APPDATA%\Murmur (created on demand)
+wstring appDataDir();   // %APPDATA%\Murmur (created on demand); MURMUR_DATA overrides it, for tests

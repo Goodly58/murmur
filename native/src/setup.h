@@ -39,3 +39,9 @@ using SetupProgress = std::function<void(const wstring& step, double fraction)>;
 // Downloads, checks and unpacks what `need` (TOOL_* bits) asks for. Returns "" on success, else a short reason.
 // Runs on the calling thread; `progress` is called from it.
 wstring installTools(int need, const SetupProgress& progress, const ToolIO& io);
+
+// Keeps the yt-dlp that Setup downloaded current: YouTube changes often, and an old yt-dlp stops working. At most
+// once in 20 hours (the time of the last good check is kept in the tools folder; `force` ignores it) it runs
+// `yt-dlp -U`, which checks the new release's SHA-256 before it replaces itself. A yt-dlp installed anywhere else is
+// the user's own and is never touched. Returns true if it asked yt-dlp to update. Runs on the calling thread.
+bool refreshYtdlp(const wstring& ytdlp, const ToolIO& io, int64_t nowSec, bool force = false);

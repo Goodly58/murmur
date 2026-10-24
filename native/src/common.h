@@ -66,5 +66,5 @@ inline int64_t wallMs() {
   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
 }
 
-// Appends a line to %APPDATA%\Murmur\murmur.log (kept small). Safe to call from any thread.
+// Appends a line, stamped with the date and time, to %APPDATA%\Murmur\murmur.log (kept small). Safe to call from any thread.
 void mlog(const char* fmt, ...);

@@ -74,7 +74,7 @@ export const SCENES = [
     beat: null, plans: ['free', 'p25', 'p50'], videos: [] },
   { id: 'calm',   name: 'Calm',   icon: 'i-leaf', mix: { ocean: 40, wind: 14, rain: 10 },
     beat: null, plans: ['t10', 't20', 'free'],
-    videos: ['q_4KI-ChIIs', 'JK0pBKoK5FQ', 'GSfT7H87zq4'] },
+    videos: ['q_4KI-ChIIs', '-OekvEFm1lo', 'GSfT7H87zq4'] },
   { id: 'sleep',  name: 'Sleep',  icon: 'i-moon', mix: { ocean: 46, brown: 22 },
     beat: null, plans: ['t60', 't30', 't90', 'free'],
     videos: ['nI725iVsyoQ', 'xORCbIptqcc', 'VAlMDl00mYY', 'JD-kMIpDfnY'] }

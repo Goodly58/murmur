@@ -1,6 +1,6 @@
 /* Offline support. Same-origin files are fetched fresh when online (so updates show up at once) and
    served from the cache when offline. YouTube and everything cross-origin is left alone. */
-const VERSION = 'murmur-5';
+const VERSION = 'murmur-6';
 const CORE = [
   './', 'index.html', 'style.css', 'ui.js', 'engine.js', 'session.js', 'video.js', 'spectrum.js', 'data.js',
   'dsp.js', 'worker.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png'

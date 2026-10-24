@@ -18,6 +18,7 @@ void testSetupUi(TestLog& t);
 
 int runSelfTests(const string& only = "");
 int runToolsTest(const wstring& dir);
+int runUpdateTest(const wstring& dir);
 int runDeviceTest(int seconds);
 int runLoopback(int seconds);
 int runSessionPeaks(int seconds);

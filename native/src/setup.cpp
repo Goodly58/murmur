@@ -257,3 +257,61 @@ wstring installTools(int need, const SetupProgress& progress, const ToolIO& io) 
   progress(L"Done", 1);
   return L"";
 }
+
+namespace {
+
+const int64_t UPDATE_EVERY = 20 * 3600;  // seconds between checks, like the daily stream scan
+
+int64_t readStamp(const wstring& path) {
+  HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return 0;
+  char buf[32] = {};
+  DWORD got = 0;
+  ReadFile(f, buf, sizeof buf - 1, &got, nullptr);
+  CloseHandle(f);
+  return _atoi64(buf);
+}
+
+void writeStamp(const wstring& path, int64_t when) {
+  const string text = std::to_string(when) + "\n";
+  HANDLE f = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return;
+  DWORD wrote = 0;
+  WriteFile(f, text.data(), (DWORD)text.size(), &wrote, nullptr);
+  CloseHandle(f);
+}
+
+// The last non-empty line of a program's output, cut short for the log.
+string lastLine(const string& out) {
+  size_t end = out.size();
+  while (end > 0 && std::isspace((unsigned char)out[end - 1])) end--;
+  size_t start = out.rfind('\n', end ? end - 1 : 0);
+  start = start == string::npos ? 0 : start + 1;
+  return out.substr(start, std::min<size_t>(end - start, 200));
+}
+
+}  // namespace
+
+bool refreshYtdlp(const wstring& ytdlp, const ToolIO& io, int64_t nowSec, bool force) {
+  const wstring root = toolsDir();
+  if (ytdlp.empty() || root.empty() || !io.run) return false;
+  const wstring prefix = root + L"\\";
+  if (_wcsnicmp(ytdlp.c_str(), prefix.c_str(), prefix.size()) != 0) return false;  // somebody else's yt-dlp: not ours to change
+  static std::atomic<bool> busy{false};
+  if (busy.exchange(true)) return false;  // another check is already running
+  struct Done {
+    ~Done() { busy = false; }
+  } done;
+
+  const wstring stamp = root + L"\\yt-dlp.checked";
+  if (!force) {
+    const int64_t last = readStamp(stamp), age = nowSec - last;
+    if (last > 0 && age >= 0 && age < UPDATE_EVERY) return false;
+  }
+  string out;
+  int code = -1;
+  const bool finished = io.run(quoted(ytdlp) + L" -U", 120000, out, &code);
+  mlog("yt-dlp update: %s (%s %d)", lastLine(out).c_str(), finished ? "exit" : "timed out, exit", code);
+  if (finished && code == 0) writeStamp(stamp, nowSec);  // a failed check is simply tried again next time
+  return true;
+}

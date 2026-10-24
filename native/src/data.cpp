@@ -106,8 +106,8 @@ static vector<SceneDef> buildScenes() {
   add("white", L"White", "i-bars", true, mk({{"white", 34}, {"pink", 20}}), bandIndex("alpha"), 20, false,
       {"free", "p25", "p50"}, {}, {}, {});
   add("calm", L"Calm", "i-leaf", false, mk({{"ocean", 40}, {"wind", 14}, {"rain", 10}}), bandIndex("alpha"), 20, false,
-      {"t10", "t20", "free"}, {"q_4KI-ChIIs", "JK0pBKoK5FQ", "GSfT7H87zq4"},
-      {"fireplace ambience", "synth ambient radio"}, {"halloween", "christmas"});
+      {"t10", "t20", "free"}, {"q_4KI-ChIIs", "-OekvEFm1lo", "GSfT7H87zq4"},
+      {"fireplace ambience", "gentle rain ambience", "synth ambient radio"}, {"halloween", "christmas"});
   add("sleep", L"Sleep", "i-moon", false, mk({{"ocean", 46}, {"brown", 22}}), bandIndex("alpha"), 20, false,
       {"t60", "t30", "t90", "free"}, {"nI725iVsyoQ", "xORCbIptqcc", "VAlMDl00mYY", "JD-kMIpDfnY"},
       {"deep sleep", "sleep ambient", "sleep lofi", "beats to sleep"}, {});

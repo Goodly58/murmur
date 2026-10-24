@@ -357,18 +357,24 @@ void testResolver(TestLog& t) {
       "JD-kMIpDfnY\tis_live\tlofi hip hop radio  beats to sleep/chill to\r\n"
       "jXAEIWcGXwE\tis_live\tclassical music radio  relaxing songs to read/study to\n"
       "q_4KI-ChIIs\tis_live\tfireplace ambience  cozy sound to chill to\n"
+      "-OekvEFm1lo\tis_live\tgentle rain ambience  cozy sound to chill to\n"
       "DWcJFNfaw9c\twas_live\tlofi hip hop radio - beats to sleep/chill to\n"
       "5qap5aO4i9A\twas_live\tlofi hip hop radio - beats to relax/study to\n"
       "garbage line without tabs\n"
       "short\tis_live\tbad id\n";
   const auto entries = parseFlatList(sample);
-  t.check("resolver: lines are parsed and bad ones skipped", entries.size() == 11, std::to_string(entries.size()));
+  t.check("resolver: lines are parsed and bad ones skipped", entries.size() == 12, std::to_string(entries.size()));
   const auto m = matchStreams(entries);
   t.check("resolver: Focus finds the current lofi radio first", m.count("focus") && m.at("focus")[0] == "rFZHOHl-L8A");
   t.check("resolver: Focus keeps sleep and halloween streams out", m.count("focus") && std::find(m.at("focus").begin(), m.at("focus").end(), "JD-kMIpDfnY") == m.at("focus").end() &&
                                                                     std::find(m.at("focus").begin(), m.at("focus").end(), "1-LpQekNa9g") == m.at("focus").end());
   t.check("resolver: Sleep finds the deep sleep stream", m.count("sleep") && m.at("sleep")[0] == "nI725iVsyoQ");
   t.check("resolver: Read gets the classical radio and Calm the fireplace", m.count("read") && m.at("read")[0] == "jXAEIWcGXwE" && m.count("calm") && m.at("calm")[0] == "q_4KI-ChIIs");
+  const SceneDef* calm = findStock("calm");
+  t.check("resolver: Calm adds the rain ambience after the fireplace", m.count("calm") && m.at("calm").size() == 2 && m.at("calm")[1] == "-OekvEFm1lo");
+  t.check("resolver: Calm has a title hint for each stream, in the same order, and no longer lists the dead one",
+          calm && calm->streams.size() == 3 && calm->hintInclude.size() == calm->streams.size() && calm->streams[1] == "-OekvEFm1lo" &&
+              calm->hintInclude[1] == "gentle rain ambience" && std::find(calm->streams.begin(), calm->streams.end(), "JK0pBKoK5FQ") == calm->streams.end());
   t.check("resolver: ended streams are not offered", !m.count("create") || std::find(m.at("create").begin(), m.at("create").end(), "DWcJFNfaw9c") == m.at("create").end());
   t.check("resolver: scenes with no stream get nothing", !m.count("mask") && !m.count("white"));
 
