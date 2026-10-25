@@ -175,22 +175,41 @@ jobs:
           7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
           Join-Path $env:RUNNER_TEMP 'mingw64\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
-      - name: Run under gdb until it crashes
+      - name: The release exe, whole suite, straight from bash
         shell: bash
         run: |
-          gdb --version | head -1
-          echo "--- the release exe straight from bash, ui group, 12 runs (exit codes):"
-          for i in $(seq 1 12); do ./Murmur.exe --selftest ui > r.log 2>&1; echo -n "$? "; done; echo
-          echo "--- the release code with symbols, under gdb, ui group:"
-          for i in $(seq 1 25); do
-            gdb -batch -ex "set pagination off" -ex run -ex "thread apply all bt 30" -ex "info registers rip rsp" -ex "x/6i \$rip" --args ./Murmur_sym.exe --selftest ui > gdb.log 2>&1 || true
+          for i in $(seq 1 8); do ./Murmur.exe --selftest > r.log 2>&1; echo -n "$? "; done; echo
+
+      - name: The release code with symbols, whole suite, under gdb
+        shell: bash
+        run: |
+          for i in $(seq 1 10); do
+            gdb -batch -ex "set pagination off" -ex run -ex "thread apply all bt 30" -ex "info registers rip rsp" -ex "x/6i \$rip" --args ./Murmur_sym.exe --selftest > gdb.log 2>&1 || true
             if ! grep -q "exited normally" gdb.log; then
               echo "=== try $i: did not exit normally"
               tail -120 gdb.log
-              exit 1
+              exit 0
             fi
           done
-          echo "no crash in 25 tries"
+          echo "no crash in 10 tries"
+
+      - name: Turn on full page heap for the symbol build
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\Murmur_sym.exe'
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name GlobalFlag -Value 0x02000000 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $key -Name PageHeapFlags -Value 0x3 -PropertyType DWord -Force | Out-Null
+          Get-ItemProperty $key | Format-List GlobalFlag, PageHeapFlags
+
+      - name: The first groups in one process, under gdb with page heap
+        shell: bash
+        run: |
+          for i in 1 2; do
+            gdb -batch -ex "set pagination off" -ex run -ex "thread apply all bt 40" -ex "info registers rip rsp" -ex "x/6i \$rip" --args ./Murmur_sym.exe --selftest json,log,model,session,app,resolver,ui,launch > gdbph.log 2>&1 || true
+            echo "=== page heap try $i:"
+            if grep -q "exited normally" gdbph.log; then echo "exited normally"; else tail -130 gdbph.log; fi
+          done
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')

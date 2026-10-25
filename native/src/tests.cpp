@@ -876,7 +876,8 @@ int runSelfTests(const string& only) {
   ScratchData scratch;
   TestLog t;
   t.verbose = true;
-  auto want = [&](const char* n) { return only.empty() || only == n; };
+  // `--selftest ui` runs one group, `--selftest json,model,ui` several in one process, `--selftest` all of them
+  auto want = [&](const char* n) { return only.empty() || ("," + only + ",").find(string(",") + n + ",") != string::npos; };
   if (only == "stream-live") { testStreamLive(t); std::printf("\n%s: %d passed, %d failed\n", t.failed ? "FAILED" : "ALL PASSED", t.passed, t.failed); return t.failed ? 1 : 0; }
   if (want("json")) testJson(t);
   if (want("log")) testLog(t);
