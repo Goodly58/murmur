@@ -6,6 +6,7 @@
 #include "data.h"
 #include "dsp.h"
 #include "fft.h"
+#include "install.h"
 #include "json.h"
 #include <psapi.h>
 #include <shlobj.h>
@@ -864,6 +865,49 @@ void testLog(TestLog& t) {
   t.check("log: a line starts with the date and the time", dated, text.substr(start, 40));
 }
 
+// --install asks before it changes anything. The install itself is swapped for a stand-in here, so these never
+// touch the real folders, Start menu or registry: they check the wording and that the question comes first.
+void testInstall(TestLog& t) {
+  const wstring add = installQuestion(false), update = installQuestion(true);
+  auto has = [](const wstring& s, const wchar_t* part) { return s.find(part) != wstring::npos; };
+  t.check("install: the question names the folder it copies to", has(add, L"Programs\\Murmur"), narrow(add));
+  t.check("install: and the Start menu shortcut and the Settings > Apps entry", has(add, L"Start menu shortcut") && has(add, L"Settings > Apps"));
+  t.check("install: and how to take it away again", has(add, L"--uninstall") && has(update, L"--uninstall"));
+  t.check("install: and that no administrator rights are needed", has(add, L"administrator"));
+  t.check("install: an existing copy is asked about as an update, listing the same places",
+          has(update, L"Update Murmur") && has(add, L"Add Murmur") && has(update, L"Programs\\Murmur") && has(update, L"Start menu shortcut") && has(update, L"Settings > Apps"));
+
+  vector<string> log;
+  wstring asked;
+  bool answer = false, there = false;
+  int result = 0;
+  InstallSteps steps;
+  steps.installed = [&] { return there; };
+  steps.confirm = [&](const wstring& q) { log.push_back("ask"); asked = q; return answer; };
+  steps.perform = [&](bool quiet) { log.push_back(quiet ? "install quietly" : "install"); return result; };
+
+  int code = installApp(false, steps);
+  t.check("install: a no changes nothing and says so in the exit code", code == INSTALL_DECLINED && log == vector<string>{"ask"});
+  log.clear();
+  answer = true;
+  code = installApp(false, steps);
+  t.check("install: a yes installs, and only after the question", code == 0 && log == vector<string>{"ask", "install"});
+  t.check("install: what it asked was the add question", asked == add);
+  log.clear();
+  there = true;
+  installApp(false, steps);
+  t.check("install: with a copy already there it asked the update question", asked == update);
+  log.clear();
+  answer = false;
+  code = installApp(true, steps);
+  t.check("install: --quiet does not ask", code == 0 && log == vector<string>{"install quietly"});
+  log.clear();
+  answer = true;
+  result = INSTALL_FAILED;
+  code = installApp(false, steps);
+  t.check("install: a failed install is reported, not hidden", code == INSTALL_FAILED && log == vector<string>{"ask", "install"});
+}
+
 // Threads started while others are ending is what crashed std::thread on the runners (see thread.h), so this
 // hammers exactly that, and checks that joining and detaching behave like std::thread's.
 void testThread(TestLog& t) {
@@ -945,6 +989,7 @@ int runSelfTests(const string& only) {
   if (want("log")) testLog(t);
   if (want("crash")) testCrash(t);
   if (want("thread")) testThread(t);
+  if (want("install")) testInstall(t);
   if (want("model")) testModel(t);
   if (want("session")) testSession(t);
   if (want("app")) testApp(t);

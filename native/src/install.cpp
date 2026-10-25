@@ -75,7 +75,8 @@ void setRegDword(HKEY k, const wchar_t* name, DWORD v) { RegSetValueExW(k, name,
 
 wstring installedExePath() { return installDir() + L"\\Murmur.exe"; }
 
-int installApp(bool quiet) {
+// The install itself. installApp asks before it gets here, because this is what changes the PC.
+static int performInstall(bool quiet) {
   const wstring self = selfPath(), dir = installDir(), target = installedExePath();
   if (dir.empty()) { say(quiet, L"Could not find the user programs folder.", true); return 1; }
   SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
@@ -114,6 +115,40 @@ int installApp(bool quiet) {
   ShellExecuteW(nullptr, L"open", target.c_str(), nullptr, dir.c_str(), SW_SHOWNORMAL);
   return 0;
 }
+
+wstring installQuestion(bool update) {
+  const wstring dir = installDir();
+  wstring q = update ? L"Update Murmur on this PC?\n\nMurmur will:\n- replace its copy in " + dir + L"\n- refresh the Start menu shortcut\n- refresh its entry in Settings > Apps\n"
+                     : L"Add Murmur to this PC?\n\nMurmur will:\n- copy itself to " + dir + L"\n- add a Start menu shortcut\n- add an entry in Settings > Apps, so it can be removed there\n";
+  q += L"\nNothing else on the PC changes, and no administrator rights are needed. To remove it later, use Settings > Apps or run Murmur.exe --uninstall.";
+  return q;
+}
+
+static bool askYesNo(const wstring& question) {
+  return MessageBoxW(nullptr, question.c_str(), L"Murmur", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1 | MB_SETFOREGROUND) == IDYES;
+}
+
+InstallSteps realInstallSteps() {
+  InstallSteps s;
+  s.installed = [] { return GetFileAttributesW(installedExePath().c_str()) != INVALID_FILE_ATTRIBUTES; };
+  s.confirm = askYesNo;
+  s.perform = performInstall;
+  return s;
+}
+
+int installApp(bool quiet, const InstallSteps& steps) {
+  if (!quiet) {
+    // the question comes first: nothing on the PC changes until it has been answered yes
+    const bool update = steps.installed && steps.installed();
+    if (!steps.confirm || !steps.confirm(installQuestion(update))) {
+      std::fwprintf(stdout, L"Cancelled: nothing was changed.\n");
+      return INSTALL_DECLINED;
+    }
+  }
+  return steps.perform(quiet);
+}
+
+int installApp(bool quiet) { return installApp(quiet, realInstallSteps()); }
 
 int uninstallApp(bool quiet) {
   const wstring dir = installDir(), target = installedExePath();

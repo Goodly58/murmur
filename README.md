@@ -16,7 +16,7 @@ Native, with no browser and no runtime. The program is 1.3 MB and uses under 25 
 Murmur.exe --install
 ```
 
-Then press the Windows key and type **Murmur**. `--uninstall` removes it again.
+It asks before it adds anything (a script can add `--quiet` to skip the question). Then press the Windows key and type **Murmur**. `--uninstall` removes it again.
 
 It isn't code-signed yet, so Windows may show a SmartScreen warning the first time: choose **More info**, then **Run anyway**. The [releases page](https://github.com/Goodly58/murmur/releases) also lists `Murmur.exe.sha256`, to check the download against.
 
