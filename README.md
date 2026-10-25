@@ -76,6 +76,8 @@ Double-click `Start Murmur.bat`.
 | `setup.cpp` | the Set up streaming button: downloads mpv and yt-dlp, checks their SHA-256, unpacks them; keeps that yt-dlp updated |
 | `install.cpp` | per-user install and Start menu entry |
 | `version.h` | the version number; `mingw32-make APP_VERSION=1.2.3` sets it |
+| `crash.cpp` | when the program dies on an exception it writes a note to `%APPDATA%\Murmur\crash.log`: the exception, the address and the calls |
+| `thread.cpp` | threads straight from the Windows API, because the toolchain's `std::thread` crashed now and then on a busy machine |
 
 **Builds and releases**: every push is built with a pinned MinGW and checked on Windows Server 2022 and 2025 (`.github/workflows/windows.yml`): the self-tests of the dev build and of the release exe, and an offscreen draw of the window. Pushing a tag like `v1.2.3` then attaches `Murmur.exe` and its SHA-256 to a GitHub release, with that version stamped into the exe. A tag with a suffix, like `v1.2.3-rc1`, makes a prerelease.
 

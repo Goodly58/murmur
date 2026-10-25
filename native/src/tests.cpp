@@ -854,6 +854,35 @@ void testLog(TestLog& t) {
   t.check("log: a line starts with the date and the time", dated, text.substr(start, 40));
 }
 
+// Threads started while others are ending is what crashed std::thread on the runners (see thread.h), so this
+// hammers exactly that, and checks that joining and detaching behave like std::thread's.
+void testThread(TestLog& t) {
+  std::atomic<int> ran{0};
+  for (int round = 0; round < 60; round++) {
+    vector<Thread> burst;
+    for (int i = 0; i < 8; i++) burst.emplace_back([&ran] { ran++; });
+    for (auto& th : burst) th.join();
+  }
+  t.check("thread: 480 threads, each started while others were ending, all ran once", ran == 480, std::to_string(ran.load()));
+
+  std::atomic<int> done{0};
+  for (int i = 0; i < 200; i++) runDetached([&done] { done++; });
+  for (int i = 0; i < 500 && done < 200; i++) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  t.check("thread: 200 detached threads ran to the end", done == 200, std::to_string(done.load()));
+
+  Thread idle;
+  t.check("thread: one that was never started is not joinable", !idle.joinable());
+  Thread started([] {});
+  const bool before = started.joinable();
+  started.join();
+  t.check("thread: a started one is joinable until it is joined", before && !started.joinable());
+  Thread moved([] {});
+  Thread target = std::move(moved);
+  t.check("thread: moving hands the thread over", !moved.joinable() && target.joinable());
+  target.detach();
+  t.check("thread: and detaching lets go of it", !target.joinable());
+}
+
 // A crash must leave a note: this runs the program itself with --crash-test and reads what it printed and kept.
 void testCrash(TestLog& t) {
   wchar_t self[MAX_PATH * 2];
@@ -905,6 +934,7 @@ int runSelfTests(const string& only) {
   if (want("json")) testJson(t);
   if (want("log")) testLog(t);
   if (want("crash")) testCrash(t);
+  if (want("thread")) testThread(t);
   if (want("model")) testModel(t);
   if (want("session")) testSession(t);
   if (want("app")) testApp(t);

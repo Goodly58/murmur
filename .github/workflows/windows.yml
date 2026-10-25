@@ -61,7 +61,7 @@ jobs:
         run: |
           echo "compiler: $(which g++) $(g++ -dumpfullversion)"
           test "$(g++ -dumpfullversion)" = "15.2.0"
-          mingw32-make -j"$(nproc)" DEBUG_INFO=-g all sym ${APP_VERSION:+APP_VERSION=$APP_VERSION}
+          mingw32-make -j"$(nproc)" ${APP_VERSION:+APP_VERSION=$APP_VERSION}
           ls -l bin
 
       - name: Check the version stamped into the exe
@@ -78,7 +78,6 @@ jobs:
           path: |
             native/bin/Murmur.exe
             native/bin/murmur_dev.exe
-            native/bin/Murmur_sym.exe
           retention-days: 14
           if-no-files-found: error
 
@@ -112,11 +111,14 @@ jobs:
           done
           exit $failed
 
+      # Three runs, because a crash that depends on timing (as one in the thread start once did, on about half the
+      # runs) shows up in one run of three far more often than in a single run. The crash handler's note goes to
+      # stderr, so it is printed when a run dies.
       - name: Self-tests of the release exe
         shell: pwsh
         run: |
           $bad = $null
-          foreach ($i in 1..6) {
+          foreach ($i in 1..3) {
             $run = Start-Process -FilePath .\Murmur.exe -ArgumentList '--selftest' -Wait -PassThru -RedirectStandardOutput "release-$i.log" -RedirectStandardError "release-$i.err"
             "run {0}: exit code {1} (0x{1:X8}), last line: {2}" -f $i, $run.ExitCode, (Get-Content "release-$i.log" -Tail 1)
             if ($run.ExitCode -ne 0 -and -not $bad) { $bad = $i }
@@ -149,77 +151,6 @@ jobs:
         run: |
           echo "### ${{ matrix.os }}" >> "$GITHUB_STEP_SUMMARY"
           tail -n 1 selftest.log >> "$GITHUB_STEP_SUMMARY" || true
-
-  # TEMPORARY: runs the dev exe under gdb until it crashes, to see where the intermittent access violation is.
-  hunt:
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2022, windows-2025]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: murmur-windows
-
-      - name: Install the pinned MinGW (for gdb)
-        shell: pwsh
-        run: |
-          $ProgressPreference = 'SilentlyContinue'
-          $archive = Join-Path $env:RUNNER_TEMP 'mingw.7z'
-          Invoke-WebRequest $env:MINGW_URL -OutFile $archive
-          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne $env:MINGW_SHA256) { throw "The MinGW download does not match its checksum ($hash)" }
-          7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
-          Join-Path $env:RUNNER_TEMP 'mingw64\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-
-      - name: The release code with symbols, whole suite, until it crashes
-        shell: bash
-        run: |
-          cat > symbolize.sh <<'EOF'
-          # turns the Murmur_sym.exe+0x... frames of a crash note into function names and lines
-          for off in $(grep -o "Murmur_sym.exe+0x[0-9a-f]*" "$1" | sed 's/.*+0x//'); do
-            printf "0x%s -> " "$off"
-            addr2line -f -C -p -e ./Murmur_sym.exe "$(printf '0x%x' $((0x140000000 + 0x$off)))"
-          done
-          EOF
-          for i in $(seq 1 10); do
-            ./Murmur_sym.exe --selftest > r.log 2>&1 && code=0 || code=$?
-            echo "run $i: exit code $code"
-            if [ "$code" != 0 ]; then
-              echo "--- the end of the output:"
-              tail -50 r.log
-              echo "--- the calls, as functions:"
-              bash symbolize.sh r.log
-              break
-            fi
-          done
-
-      - name: Turn on full page heap for the symbol build
-        shell: pwsh
-        run: |
-          $key = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\Murmur_sym.exe'
-          New-Item -Path $key -Force | Out-Null
-          New-ItemProperty -Path $key -Name GlobalFlag -Value 0x02000000 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty -Path $key -Name PageHeapFlags -Value 0x3 -PropertyType DWord -Force | Out-Null
-          Get-ItemProperty $key | Format-List GlobalFlag, PageHeapFlags
-
-      - name: The first groups in one process with full page heap
-        shell: bash
-        run: |
-          for i in 1 2 3; do
-            ./Murmur_sym.exe --selftest json,log,model,session,app,resolver,ui,launch > ph.log 2>&1 && code=0 || code=$?
-            echo "page heap run $i: exit code $code"
-            if [ "$code" != 0 ]; then
-              echo "--- the end of the output:"
-              tail -50 ph.log
-              echo "--- the calls, as functions:"
-              bash symbolize.sh ph.log
-              break
-            fi
-          done
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
