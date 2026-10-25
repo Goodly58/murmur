@@ -25,7 +25,7 @@ release: bin/Murmur.exe
 dev: bin/murmur_dev.exe
 
 obj/rel/%.o: src/%.cpp | obj/rel
-	$(CXX) $(COMMON) -O2 -DNDEBUG -c $< -o $@
+	$(CXX) $(COMMON) -O2 -DNDEBUG $(DEBUG_INFO) -c $< -o $@
 obj/dev/%.o: src/%.cpp | obj/dev
 	$(CXX) $(COMMON) -O1 -c $< -o $@
 obj obj/rel obj/dev bin:
@@ -41,9 +41,13 @@ bin/Murmur.exe: $(REL_OBJ) $(EXTRA) | bin
 	$(CXX) -municode -mwindows -s $(REL_OBJ) $(EXTRA) -o $@ $(LIBS)
 bin/murmur_dev.exe: $(DEV_OBJ) $(EXTRA) | bin
 	$(CXX) -municode -mconsole $(DEV_OBJ) $(EXTRA) -o $@ $(LIBS)
+# the release code with its symbols kept, for a debugger (mingw32-make DEBUG_INFO=-g sym adds line numbers)
+sym: bin/Murmur_sym.exe
+bin/Murmur_sym.exe: $(REL_OBJ) $(EXTRA) | bin
+	$(CXX) -municode -mwindows $(REL_OBJ) $(EXTRA) -o $@ $(LIBS)
 
 clean:
-	rm -rf obj bin/Murmur.exe bin/murmur_dev.exe
+	rm -rf obj bin/Murmur.exe bin/murmur_dev.exe bin/Murmur_sym.exe
 
 -include $(REL_OBJ:.o=.d) $(DEV_OBJ:.o=.d)
-.PHONY: all release dev clean
+.PHONY: all release dev sym clean

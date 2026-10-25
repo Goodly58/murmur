@@ -61,7 +61,7 @@ jobs:
         run: |
           echo "compiler: $(which g++) $(g++ -dumpfullversion)"
           test "$(g++ -dumpfullversion)" = "15.2.0"
-          mingw32-make -j"$(nproc)" ${APP_VERSION:+APP_VERSION=$APP_VERSION}
+          mingw32-make -j"$(nproc)" DEBUG_INFO=-g all sym ${APP_VERSION:+APP_VERSION=$APP_VERSION}
           ls -l bin
 
       - name: Check the version stamped into the exe
@@ -78,6 +78,7 @@ jobs:
           path: |
             native/bin/Murmur.exe
             native/bin/murmur_dev.exe
+            native/bin/Murmur_sym.exe
           retention-days: 14
           if-no-files-found: error
 
@@ -178,18 +179,18 @@ jobs:
         shell: bash
         run: |
           gdb --version | head -1
-          for round in $(seq 1 30); do
-            for spec in "audio 7" "ui 1"; do
-              set -- $spec
-              MURMUR_TEST_SEED=$2 gdb -batch -ex "set pagination off" -ex run -ex "thread apply all bt 25" --args ./murmur_dev.exe --selftest $1 > gdb.log 2>&1 || true
-              if ! grep -q "exited normally" gdb.log; then
-                echo "=== round $round, group $1: did not exit normally"
-                tail -90 gdb.log
-                exit 1
-              fi
-            done
+          echo "--- the release exe straight from bash, ui group, 12 runs (exit codes):"
+          for i in $(seq 1 12); do ./Murmur.exe --selftest ui > r.log 2>&1; echo -n "$? "; done; echo
+          echo "--- the release code with symbols, under gdb, ui group:"
+          for i in $(seq 1 25); do
+            gdb -batch -ex "set pagination off" -ex run -ex "thread apply all bt 30" -ex "info registers rip rsp" -ex "x/6i \$rip" --args ./Murmur_sym.exe --selftest ui > gdb.log 2>&1 || true
+            if ! grep -q "exited normally" gdb.log; then
+              echo "=== try $i: did not exit normally"
+              tail -120 gdb.log
+              exit 1
+            fi
           done
-          echo "no crash in 30 rounds"
+          echo "no crash in 25 tries"
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
