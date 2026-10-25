@@ -4,6 +4,7 @@
 #include "common.h"
 #include "data.h"
 #include "dsp.h"
+#include "thread.h"
 
 struct BeatSpec {
   int mode = 0;     // 0 off, 1 binaural (headphones), 2 isochronic (speakers)
@@ -79,7 +80,7 @@ class Engine {
   std::atomic<int> rate_{48000};
   std::atomic<int64_t> lastActive_{0};
   std::atomic<uint32_t> seed_{0};  // 0: random noise and starting points, as in the app; else fixed (offline engines)
-  std::thread thread_;
+  Thread thread_;
 
   // audio-thread state
   Chan chans_[NCH];

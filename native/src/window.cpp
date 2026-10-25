@@ -317,7 +317,7 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
     startResolver(hwnd, WM_APP_FRESH, stream.ytdlpPath(), true);
   };
   app->startSetup = [hw = hwnd](int need) {
-    std::thread([hw, need] {
+    runDetached([hw, need] {
       int64_t lastPost = 0;
       wstring lastStep;
       const wstring error = installTools(need, [&](const wstring& step, double fraction) {
@@ -335,7 +335,7 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
       m->ok = error.empty();
       m->error = error;
       if (!PostMessageW(hw, WM_APP_SETUP, 0, (LPARAM)m)) delete m;
-    }).detach();
+    });
   };
   stream.setSink([hw = hwnd](const StreamEvent& e) { PostMessageW(hw, WM_APP_STREAM, 0, (LPARAM) new StreamEvent(e)); });
 
@@ -809,7 +809,7 @@ void MainWindow::wantPoster() {
     Com<IWICBitmap> bmp = decodeImage(gfx, vector<uint8_t>(cached.begin(), cached.end()));
     if (bmp) { ui->setPoster(id, bmp, false); return; }
   }
-  std::thread([hw = hwnd, id, dir, path] {
+  runDetached([hw = hwnd, id, dir, path] {
     auto* m = new PosterMsg;
     m->id = id;
     m->ok = httpsGet(L"i.ytimg.com", L"/vi/" + widen(id) + L"/mqdefault.jpg", m->bytes, 6000);
@@ -818,7 +818,7 @@ void MainWindow::wantPoster() {
       writeFileAtomic(path, string(m->bytes.begin(), m->bytes.end()));
     }
     if (!PostMessageW(hw, WM_APP_POSTER, 0, (LPARAM)m)) delete m;
-  }).detach();
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------

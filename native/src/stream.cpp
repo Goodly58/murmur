@@ -23,7 +23,7 @@ Stream::Stream() {
     li.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     SetInformationJobObject(job_, JobObjectExtendedLimitInformation, &li, sizeof li);
   }
-  watchdog_ = std::thread([this] { watchdogLoop(); });
+  watchdog_ = Thread([this] { watchdogLoop(); });
 }
 
 Stream::~Stream() {
@@ -132,7 +132,7 @@ bool Stream::ensureProcess(bool video) {
   video_ = video;
   const int pid = ++procId_;
   readers_++;
-  std::thread([this, pipe, pid] { readerLoop(pipe, pid); }).detach();
+  runDetached([this, pipe, pid] { readerLoop(pipe, pid); });
   // properties we want to hear about
   send("{\"command\":[\"observe_property\",1,\"media-title\"]}");
   send("{\"command\":[\"observe_property\",2,\"playlist-pos\"]}");

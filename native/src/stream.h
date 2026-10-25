@@ -2,6 +2,7 @@
 // mpv is a separate process controlled over a named pipe, so decoding never touches this app's memory.
 #pragma once
 #include "common.h"
+#include "thread.h"
 
 struct StreamEvent {
   enum Type { Loading, Playing, Title, Failed, Closed, Index } type = Loading;
@@ -61,7 +62,7 @@ class Stream {
   std::mutex mu_, sinkMu_;
   std::atomic<int> readers_{0};
   HANDLE job_ = nullptr, proc_ = nullptr, pipe_ = nullptr;
-  std::thread watchdog_;
+  Thread watchdog_;
   std::atomic<int> gen_{0};
   int procId_ = 0;
   bool video_ = false, dry_ = false, loaded_ = false, quit_ = false;

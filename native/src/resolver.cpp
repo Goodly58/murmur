@@ -4,6 +4,7 @@
 #include "json.h"
 #include "net.h"
 #include "setup.h"
+#include "thread.h"
 
 namespace {
 
@@ -162,7 +163,7 @@ std::map<string, vector<string>> matchStreams(const vector<StreamEntry>& entries
 }
 
 void startResolver(HWND hwnd, UINT msg, const wstring& ytdlp, bool force) {
-  std::thread([hwnd, msg, ytdlp, force] {
+  runDetached([hwnd, msg, ytdlp, force] {
     std::map<string, vector<string>> fresh;
     int64_t at = 0;
     const bool cached = loadCache(fresh, &at);
@@ -186,5 +187,5 @@ void startResolver(HWND hwnd, UINT msg, const wstring& ytdlp, bool force) {
     if (matched.empty()) return;
     saveCache(matched);
     PostMessageW(hwnd, msg, 0, (LPARAM) new std::map<string, vector<string>>(std::move(matched)));
-  }).detach();
+  });
 }

@@ -136,7 +136,7 @@ bool Engine::start(bool realDevice, int offlineRate) {
     seed_ = v > 0 ? (uint32_t)v : 1u;
     return true;
   }
-  thread_ = std::thread([this] { deviceLoop(); });
+  thread_ = Thread([this] { deviceLoop(); });
   return true;
 }
 
@@ -235,12 +235,12 @@ void Engine::requestLoad(int id) {
   // each loop's noise: random in the app, from the fixed seed in an offline engine
   const int64_t clock = seed_.load() ? (int64_t)seed_.load() : std::chrono::steady_clock::now().time_since_epoch().count();
   const uint32_t seed = (uint32_t)(clock * 2654435761u) ^ (uint32_t)(id * 7919);
-  std::thread([sh = sh_, id, rate, seed] {
+  runDetached([sh = sh_, id, rate, seed] {
     auto loop = renderLoop(id, seed, rate);
     std::lock_guard<std::mutex> g(sh->mu);
     if (sh->loopRate == rate) sh->loops[id] = loop;
     sh->loading[id] = false;
-  }).detach();
+  });
 }
 
 bool Engine::waitSoundsReady(int timeoutMs) {
