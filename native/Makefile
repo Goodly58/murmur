@@ -2,10 +2,16 @@
 #   mingw32-make            -> bin/Murmur.exe (windowed release) and bin/murmur_dev.exe (console, self-tests)
 #   mingw32-make release    -> only the release exe
 #   mingw32-make dev        -> only the dev exe
+#   mingw32-make APP_VERSION=1.2.3 -> stamps that version into the exe (the release workflow does this for a tag);
+#                              without it a build is 1.0.0, see src/version.h
 CXX      := g++
 SRC      := $(wildcard src/*.cpp)
 WARN     := -Wall -Wextra -Wno-unused-parameter
-COMMON   := -std=c++17 -municode -D_WIN32_WINNT=0x0A00 $(WARN) -MMD -MP
+ifneq ($(APP_VERSION),)
+VER_PARTS := $(subst ., ,$(APP_VERSION))
+VERDEFS   := -DMURMUR_VER_MAJOR=$(word 1,$(VER_PARTS)) -DMURMUR_VER_MINOR=$(or $(word 2,$(VER_PARTS)),0) -DMURMUR_VER_PATCH=$(or $(word 3,$(VER_PARTS)),0)
+endif
+COMMON   := -std=c++17 -municode -D_WIN32_WINNT=0x0A00 $(WARN) $(VERDEFS) -MMD -MP
 LIBS     := -static -static-libgcc -static-libstdc++ -lpthread -lole32 -loleaut32 -luuid -lavrt -lpsapi -lwinhttp \
             -lshell32 -ld2d1 -ldwrite -lwindowscodecs -lshlwapi -lgdi32 -lcomdlg32 -ldwmapi -lcomctl32 -luser32 -ladvapi32
 RES_OBJ  := obj/murmur_res.o
@@ -26,8 +32,8 @@ obj obj/rel obj/dev bin:
 	mkdir -p $@
 
 ifneq ($(HAS_ICON),)
-$(RES_OBJ): res/murmur.rc res/murmur.manifest res/murmur.ico | obj
-	windres res/murmur.rc -O coff -o $@
+$(RES_OBJ): res/murmur.rc res/murmur.manifest res/murmur.ico src/version.h | obj
+	windres res/murmur.rc -O coff -o $@ $(VERDEFS)
 EXTRA := $(RES_OBJ)
 endif
 

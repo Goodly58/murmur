@@ -1,0 +1,161 @@
+name: Windows app
+
+# Every push is built with a pinned MinGW and checked on two Windows versions. Pushing a tag like v1.2.3 also
+# attaches Murmur.exe and its SHA-256 to a GitHub release, once the checks pass.
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  # The compiler the app is developed with: MinGW-Builds, GCC 15.2.0, UCRT, posix threads, SEH. It is pinned, with
+  # the SHA-256 GitHub records for the download, so the exe that ships is built the way it was tested.
+  MINGW_URL: https://github.com/niXman/mingw-builds-binaries/releases/download/15.2.0-rt_v13-rev0/x86_64-15.2.0-release-posix-seh-ucrt-rt_v13-rev0.7z
+  MINGW_SHA256: 05b3361a3a3e20a5789db37fc2bb6a70d0b02e4667b5a31d9a6672ea40d22c69
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Keep line endings as stored
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@v7
+
+      - name: Install the pinned MinGW
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $archive = Join-Path $env:RUNNER_TEMP 'mingw.7z'
+          Invoke-WebRequest $env:MINGW_URL -OutFile $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:MINGW_SHA256) { throw "The MinGW download does not match its checksum ($hash)" }
+          7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not unpack MinGW' }
+          Join-Path $env:RUNNER_TEMP 'mingw64\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Work out the version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            re='^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?$'
+            if [[ ! "$GITHUB_REF_NAME" =~ $re ]]; then
+              echo "::error::A release tag must look like v1.2.3 or v1.2.3-rc1, not $GITHUB_REF_NAME"
+              exit 1
+            fi
+            echo "APP_VERSION=${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        shell: bash
+        working-directory: native
+        run: |
+          echo "compiler: $(which g++) $(g++ -dumpfullversion)"
+          test "$(g++ -dumpfullversion)" = "15.2.0"
+          mingw32-make -j"$(nproc)" ${APP_VERSION:+APP_VERSION=$APP_VERSION}
+          ls -l bin
+
+      - name: Check the version stamped into the exe
+        shell: pwsh
+        run: |
+          $info = (Get-Item native/bin/Murmur.exe).VersionInfo
+          "Murmur.exe says: product $($info.ProductVersion), file $($info.FileVersion)"
+          $want = if ($env:APP_VERSION) { $env:APP_VERSION } else { '1.0.0' }
+          if ($info.ProductVersion -ne $want) { throw "Expected version $want" }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: murmur-windows
+          path: |
+            native/bin/Murmur.exe
+            native/bin/murmur_dev.exe
+          retention-days: 14
+          if-no-files-found: error
+
+  test:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: murmur-windows
+
+      - name: Self-tests of the dev build
+        shell: bash
+        run: ./murmur_dev.exe --selftest | tee selftest.log
+
+      - name: Self-tests of the release exe
+        shell: pwsh
+        run: |
+          $run = Start-Process -FilePath .\Murmur.exe -ArgumentList '--selftest' -Wait -PassThru
+          "Murmur.exe --selftest exited with $($run.ExitCode)"
+          if ($run.ExitCode -ne 0) { exit 1 }
+
+      - name: Draw the real window offscreen
+        shell: pwsh
+        run: |
+          $run = Start-Process -FilePath .\Murmur.exe -ArgumentList '--snapshot','snapshot.png','--size','1180x760' -Wait -PassThru
+          if ($run.ExitCode -ne 0 -or -not (Test-Path snapshot.png)) { throw 'The offscreen render failed' }
+          $size = (Get-Item snapshot.png).Length
+          "snapshot.png is $size bytes"
+          if ($size -lt 20000) { throw 'The offscreen render is nearly empty' }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: snapshot-${{ matrix.os }}
+          path: snapshot.png
+          retention-days: 14
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          echo "### ${{ matrix.os }}" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 1 selftest.log >> "$GITHUB_STEP_SUMMARY" || true
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: murmur-windows
+
+      - name: Attach the exe to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          sha256sum Murmur.exe > Murmur.exe.sha256
+          cat Murmur.exe.sha256
+          cat > notes.md <<'EOF'
+          Murmur.exe is the whole app. Run `Murmur.exe --install` to add it to the Start menu (no admin rights needed).
+
+          It is not code-signed yet, so Windows SmartScreen may ask you to confirm the first run (More info, then Run anyway). `Murmur.exe.sha256` holds the SHA-256 to check the download against.
+          EOF
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$TAG" Murmur.exe Murmur.exe.sha256 --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            flags=()
+            if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+            gh release create "$TAG" Murmur.exe Murmur.exe.sha256 --repo "$GITHUB_REPOSITORY" --verify-tag \
+              --title "Murmur ${TAG#v}" --notes-file notes.md --generate-notes "${flags[@]}"
+          fi

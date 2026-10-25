@@ -2,6 +2,7 @@
 
 #include "jumplist.h"
 #include "setup.h"
+#include "version.h"
 
 #include <shellapi.h>
 #include <shlobj.h>
@@ -98,7 +99,7 @@ int installApp(bool quiet) {
   HKEY k = nullptr;
   if (RegCreateKeyExW(HKEY_CURRENT_USER, UNINSTALL_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr) == ERROR_SUCCESS) {
     setReg(k, L"DisplayName", L"Murmur");
-    setReg(k, L"DisplayVersion", L"1.0");
+    setReg(k, L"DisplayVersion", widen(MURMUR_VERSION));
     setReg(k, L"Publisher", L"Murmur");
     setReg(k, L"InstallLocation", dir);
     setReg(k, L"DisplayIcon", target);

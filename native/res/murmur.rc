@@ -1,12 +1,13 @@
 #include <winuser.h>
 #include <winver.h>
+#include "../src/version.h"
 
 1 ICON "murmur.ico"
 1 RT_MANIFEST "murmur.manifest"
 
 1 VERSIONINFO
-FILEVERSION 1,0,0,0
-PRODUCTVERSION 1,0,0,0
+FILEVERSION MURMUR_VER_MAJOR,MURMUR_VER_MINOR,MURMUR_VER_PATCH,0
+PRODUCTVERSION MURMUR_VER_MAJOR,MURMUR_VER_MINOR,MURMUR_VER_PATCH,0
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -16,8 +17,8 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "Murmur"
       VALUE "ProductName", "Murmur"
-      VALUE "ProductVersion", "1.0"
-      VALUE "FileVersion", "1.0.0.0"
+      VALUE "ProductVersion", MURMUR_VERSION
+      VALUE "FileVersion", MURMUR_FILE_VERSION
       VALUE "InternalName", "Murmur"
       VALUE "OriginalFilename", "Murmur.exe"
     END
