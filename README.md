@@ -133,3 +133,7 @@ Each sound is synthesised once into a looping stereo buffer in a worker, so play
 - `node tools/calibrate.js` re-measures the sound loops after a renderer change.
 
 </details>
+
+## License
+
+[MIT](LICENSE). mpv and yt-dlp are separate programs with their own licenses; Murmur downloads them only when you click **Set up streaming**.
