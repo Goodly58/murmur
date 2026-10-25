@@ -42,6 +42,7 @@ class Model {
  public:
   State s;
   std::function<time_t()> nowFn = [] { return time(nullptr); };
+  std::function<string()> newId;  // for tests: where a new preset's id comes from (unset: a timestamp and random characters)
   std::array<int, NCH> lastLevel{};
 
   static bool parse(const string& json, State& out);

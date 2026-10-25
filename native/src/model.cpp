@@ -451,7 +451,9 @@ string Model::savePreset() {
   const string src = s.scene;
   const bool srcCustom = scene().custom;
   Preset p;
-  p.id = newPresetId();
+  // a timestamp and three random characters are unlikely to repeat, but presets saved in the same millisecond can,
+  // so an id that a preset (or the one waiting to be undone) already has is simply drawn again
+  do p.id = newId ? newId() : newPresetId(); while (findPreset(p.id) || (undo_.valid && undo_.p.id == p.id));
   p.name = widen(autoName());
   p.base = scene().custom ? scene().base : scene().id;
   p.plan = planId();

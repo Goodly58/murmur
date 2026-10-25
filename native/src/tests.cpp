@@ -148,7 +148,9 @@ void testDsp(TestLog& t) {
     t.check(fmt("dsp %s: loop seam is clean", names[i]), s.jump < 6 && (!steady || (s.seam > 0.6 && s.seam < 1.4)), fmt("seam %.2f jump %.2f", s.seam, s.jump));
     t.check(fmt("dsp %s: ears are uncorrelated", names[i]), std::fabs(s.corr) < 0.12, fmt("%.3f", s.corr));
     t.check(fmt("dsp %s: crest factor is sane", names[i]), s.crest > 2 && s.crest < 14, fmt("%.1f", s.crest));
-    t.check(fmt("dsp %s: renders fast", names[i]), s.ms < 400, fmt("%.0f ms at %d Hz", s.ms, s.rate));
+    // 100 to 170 ms on the runners, 80 on a fast PC; a busy machine can double that, so the bound only catches a
+    // render that has become many times slower
+    t.check(fmt("dsp %s: renders fast", names[i]), s.ms < 1000, fmt("%.0f ms at %d Hz", s.ms, s.rate));
   }
 
   // a different seed gives a different sound, the same seed the same one
@@ -522,6 +524,14 @@ void testModel(TestLog& t) {
   std::set<string> ids;
   for (auto& p : lim.s.presets) unique = unique && ids.insert(p.id).second;
   t.check("model: preset ids are unique", unique);
+  {
+    // two presets saved in the same millisecond can draw the same id, so one that is taken is drawn again
+    Model dup;
+    int calls = 0;
+    dup.newId = [&] { return calls++ < 3 ? string("cdup") : string("cdup2"); };
+    const string first = dup.savePreset(), second = dup.savePreset();
+    t.check("model: an id that is already taken is drawn again", first == "cdup" && second == "cdup2" && dup.s.presets.size() == 2, first + " " + second);
+  }
 
   // persistence
   m.s.beatsMode = 2;
