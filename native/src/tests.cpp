@@ -223,13 +223,15 @@ void testAudio(TestLog& t) {
     t.check("audio: wanted loops get rendered", e.waitSoundsReady(5000));
     Rendered o = pull(e, 3.0);
     const double rms = tailRms(o.l, 1.0, SR);
-    // brown at level 45: (0.45^1.5) * 1.5 * 0.25 = 0.113, pink adds 0.011
-    t.check("audio: focus mix lands at the expected level", rms > 0.095 && rms < 0.135, fmt("rms %.4f", rms));
+    // brown at level 45: (0.45^1.5) * 1.5 * 0.25 = 0.113, pink adds 0.011. A one second window of brown noise
+    // wanders by about 15% around that, so this only catches a level that is grossly off.
+    t.check("audio: focus mix lands at the expected level", rms > 0.085 && rms < 0.15, fmt("rms %.4f", rms));
     double peak = 0;
     for (float v : o.l) peak = std::max(peak, (double)std::fabs(v));
     t.check("audio: never clips", peak <= 1.0, fmt("peak %.3f", peak));
     t.check("audio: ears differ", std::fabs(rmsOf(o.l.data(), o.l.size()) - rmsOf(o.r.data(), o.r.size())) < 0.02 && o.l != o.r);
     t.check("audio: loops are held in memory", e.loopBytes() > 1000000, fmt("%.1f MB", e.loopBytes() / 1048576.0));
+    Rendered back;  // the focus mix again, after the level checks below
 
     // Level ratios are measured on one sound over a whole loop period (brown loops every 14 s), where the RMS
     // does not depend on where the window starts, so the noise itself cannot skew the result.
@@ -259,21 +261,27 @@ void testAudio(TestLog& t) {
       e.setMaster(1.0);
 
       e.setMix(m, BeatSpec{0, 10, 0}, 0.01);  // back to the focus mix for the checks below
-      pull(e, 2.0);
+      back = pull(e, 2.0);
     }
 
-    // scope tap sees the pre-master mix
+    // The scope tap is the pre-master mix as mono. With the master and the fade at 1 and the signal under the limiter's
+    // knee, that is the left and right of what was played, averaged, sample for sample, however the noise happens to
+    // look at that moment (a short window of brown noise can be quiet, so its level alone says little).
     vector<float> sc(4096);
     e.copyScope(sc.data(), 4096);
-    t.check("audio: scope tap has signal", rmsOf(sc.data(), sc.size()) > 0.05, fmt("%.3f", rmsOf(sc.data(), sc.size())));
+    double worst = 0;
+    const size_t off = back.l.size() - sc.size();
+    for (size_t i = 0; i < sc.size(); i++) worst = std::max(worst, (double)std::fabs(sc[i] - 0.5f * (back.l[off + i] + back.r[off + i])));
+    t.check("audio: scope tap is the mono mix of what is played", worst < 1e-3 && rmsOf(sc.data(), sc.size()) > 0.01,
+            fmt("worst difference %.6f, rms %.3f", worst, rmsOf(sc.data(), sc.size())));
 
     // pause fades to silence
     e.pause();
     Rendered ps = pull(e, 0.6);
     t.check("audio: pause fades to silence", tailRms(ps.l, 0.1, SR) < 1e-4, fmt("%.6f", tailRms(ps.l, 0.1, SR)));
     e.play();
-    Rendered rs = pull(e, 0.8);
-    t.check("audio: resume comes back", tailRms(rs.l, 0.2, SR) > 0.05);
+    Rendered rs = pull(e, 1.8);  // the last second is well after the fade back in
+    t.check("audio: resume comes back", tailRms(rs.l, 1.0, SR) > 0.05, fmt("rms %.4f", tailRms(rs.l, 1.0, SR)));
   }
   {
     Engine e;

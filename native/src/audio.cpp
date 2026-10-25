@@ -128,6 +128,12 @@ bool Engine::start(bool realDevice, int offlineRate) {
   if (!realDevice) {
     rate_ = offlineRate;
     playing_ = true;
+    // An offline engine (tests, snapshots) is repeatable: its noise and where each sound starts follow a fixed seed,
+    // and MURMUR_TEST_SEED tries another one. The app's own engine stays random, so no two sessions sound alike.
+    wchar_t env[16];
+    const DWORD n = GetEnvironmentVariableW(L"MURMUR_TEST_SEED", env, 16);
+    const int v = (n > 0 && n < 16) ? _wtoi(env) : 0;
+    seed_ = v > 0 ? (uint32_t)v : 1u;
     return true;
   }
   thread_ = std::thread([this] { deviceLoop(); });
@@ -226,7 +232,9 @@ void Engine::requestLoad(int id) {
     if (sh_->loops[id] || sh_->loading[id]) return;
     sh_->loading[id] = true;
   }
-  const uint32_t seed = (uint32_t)(std::chrono::steady_clock::now().time_since_epoch().count() * 2654435761u) ^ (uint32_t)(id * 7919);
+  // each loop's noise: random in the app, from the fixed seed in an offline engine
+  const int64_t clock = seed_.load() ? (int64_t)seed_.load() : std::chrono::steady_clock::now().time_since_epoch().count();
+  const uint32_t seed = (uint32_t)(clock * 2654435761u) ^ (uint32_t)(id * 7919);
   std::thread([sh = sh_, id, rate, seed] {
     auto loop = renderLoop(id, seed, rate);
     std::lock_guard<std::mutex> g(sh->mu);
@@ -306,7 +314,10 @@ void Engine::renderBlock(float* out, int frames) {
       Chan& c = chans_[i];
       if (c.loop != lp[i]) {
         c.loop = lp[i];
-        if (c.loop) c.pos = (double)(((uint64_t)wallMs() * 2654435761ull + (uint64_t)i * 40503ull) % (uint64_t)c.loop->frames());
+        if (c.loop) {
+          const int64_t clock = seed_.load() ? (int64_t)seed_.load() : wallMs();  // a random start, unless the seed is fixed
+          c.pos = (double)(((uint64_t)clock * 2654435761ull + (uint64_t)i * 40503ull) % (uint64_t)c.loop->frames());
+        }
       }
       const double lvl = p.want[(size_t)i] / 100.0;
       const double target = (c.loop && lvl > 0) ? std::pow(lvl, 1.5) * LOUD[i] : 0.0;

@@ -98,6 +98,19 @@ jobs:
         shell: bash
         run: ./murmur_dev.exe --selftest | tee selftest.log
 
+      - name: Audio checks under 25 different noise seeds
+        shell: bash
+        run: |
+          failed=0
+          for seed in $(seq 1 25); do
+            if ! MURMUR_TEST_SEED=$seed ./murmur_dev.exe --selftest audio > seed.log 2>&1; then
+              echo "seed $seed fails:"
+              grep FAIL seed.log
+              failed=1
+            fi
+          done
+          exit $failed
+
       - name: Self-tests of the release exe
         shell: pwsh
         run: |

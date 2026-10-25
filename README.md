@@ -75,6 +75,9 @@ Double-click `Start Murmur.bat`.
 | `stream.cpp` `resolver.cpp` | mpv over a pipe; finds live streams for each scene daily |
 | `setup.cpp` | the Set up streaming button: downloads mpv and yt-dlp, checks their SHA-256, unpacks them; keeps that yt-dlp updated |
 | `install.cpp` | per-user install and Start menu entry |
+| `version.h` | the version number; `mingw32-make APP_VERSION=1.2.3` sets it |
+
+**Builds and releases**: every push is built with a pinned MinGW and checked on Windows Server 2022 and 2025 (`.github/workflows/windows.yml`): the self-tests of the dev build and of the release exe, and an offscreen draw of the window. Pushing a tag like `v1.2.3` then attaches `Murmur.exe` and its SHA-256 to a GitHub release, with that version stamped into the exe. A tag with a suffix, like `v1.2.3-rc1`, makes a prerelease.
 
 **Web app**: each sound is synthesised once into a looping stereo buffer in a worker, so playback is `BufferSource -> Gain` with no per-sample JavaScript. The audio context sleeps when nothing plays, the YouTube player only exists while a video is wanted, and the spectrum repaints only while the mix changes.
 
