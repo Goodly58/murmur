@@ -172,7 +172,7 @@ jobs:
           sha256sum Murmur.exe > Murmur.exe.sha256
           cat Murmur.exe.sha256
           cat > notes.md <<'EOF'
-          Murmur.exe is the whole app. Run `Murmur.exe --install` to add it to the Start menu (no admin rights needed).
+          Murmur: focus sounds that run themselves. Murmur.exe is the whole app. Run it to start, or run `Murmur.exe --install` to add it to the Start menu (no admin rights needed).
 
           It is not code-signed yet, so Windows SmartScreen may ask you to confirm the first run (More info, then Run anyway). `Murmur.exe.sha256` holds the SHA-256 to check the download against.
           EOF
