@@ -19,6 +19,7 @@ void testSetupUi(TestLog& t);
 int runSelfTests(const string& only = "");
 int runToolsTest(const wstring& dir);
 int runUpdateTest(const wstring& dir);
+int runCrashTest();  // dies on a null write, on purpose, to see what the crash handler leaves behind
 int runDeviceTest(int seconds);
 int runLoopback(int seconds);
 int runSessionPeaks(int seconds);

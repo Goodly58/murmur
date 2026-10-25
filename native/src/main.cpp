@@ -2,6 +2,7 @@
 #include "common.h"
 #include <shellapi.h>
 #include "common.h"
+#include "crash.h"
 #include "install.h"
 #include "rig.h"
 #include "tests.h"
@@ -22,7 +23,7 @@ void attachParentConsole() {
 }
 
 bool isCliFlag(const wstring& a) {
-  return a == L"--selftest" || a == L"--snapshot" || a == L"--device-test" || a == L"--loopback" || a == L"--session-peaks" || a == L"--lost-test" || a == L"--tools-test" || a == L"--update-test" ||
+  return a == L"--selftest" || a == L"--snapshot" || a == L"--device-test" || a == L"--loopback" || a == L"--session-peaks" || a == L"--lost-test" || a == L"--tools-test" || a == L"--update-test" || a == L"--crash-test" ||
          a == L"--make-icon" || a == L"--install" || a == L"--uninstall";
 }
 
@@ -32,8 +33,10 @@ bool hasFlag(const vector<wstring>& args, const wchar_t* f) {
 }
 
 int dispatch(const vector<wstring>& args, HINSTANCE inst, int show) {
+  installCrashHandler();
   for (size_t i = 0; i < args.size(); i++) {
     const wstring& a = args[i];
+    if (a == L"--crash-test") return runCrashTest();
     if (a == L"--selftest") {
       string only;
       if (i + 1 < args.size() && args[i + 1][0] != L'-') only = narrow(args[i + 1]);

@@ -175,23 +175,27 @@ jobs:
           7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
           Join-Path $env:RUNNER_TEMP 'mingw64\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
-      - name: The release exe, whole suite, straight from bash
+      - name: The release code with symbols, whole suite, until it crashes
         shell: bash
         run: |
-          for i in $(seq 1 8); do ./Murmur.exe --selftest > r.log 2>&1; echo -n "$? "; done; echo
-
-      - name: The release code with symbols, whole suite, under gdb
-        shell: bash
-        run: |
+          cat > symbolize.sh <<'EOF'
+          # turns the Murmur_sym.exe+0x... frames of a crash note into function names and lines
+          for off in $(grep -o "Murmur_sym.exe+0x[0-9a-f]*" "$1" | sed 's/.*+0x//'); do
+            printf "0x%s -> " "$off"
+            addr2line -f -C -p -e ./Murmur_sym.exe "$(printf '0x%x' $((0x140000000 + 0x$off)))"
+          done
+          EOF
           for i in $(seq 1 10); do
-            gdb -batch -ex "set pagination off" -ex run -ex "thread apply all bt 30" -ex "info registers rip rsp" -ex "x/6i \$rip" --args ./Murmur_sym.exe --selftest > gdb.log 2>&1 || true
-            if ! grep -q "exited normally" gdb.log; then
-              echo "=== try $i: did not exit normally"
-              tail -120 gdb.log
-              exit 0
+            ./Murmur_sym.exe --selftest > r.log 2>&1 && code=0 || code=$?
+            echo "run $i: exit code $code"
+            if [ "$code" != 0 ]; then
+              echo "--- the end of the output:"
+              tail -50 r.log
+              echo "--- the calls, as functions:"
+              bash symbolize.sh r.log
+              break
             fi
           done
-          echo "no crash in 10 tries"
 
       - name: Turn on full page heap for the symbol build
         shell: pwsh
@@ -202,13 +206,19 @@ jobs:
           New-ItemProperty -Path $key -Name PageHeapFlags -Value 0x3 -PropertyType DWord -Force | Out-Null
           Get-ItemProperty $key | Format-List GlobalFlag, PageHeapFlags
 
-      - name: The first groups in one process, under gdb with page heap
+      - name: The first groups in one process with full page heap
         shell: bash
         run: |
-          for i in 1 2; do
-            gdb -batch -ex "set pagination off" -ex run -ex "thread apply all bt 40" -ex "info registers rip rsp" -ex "x/6i \$rip" --args ./Murmur_sym.exe --selftest json,log,model,session,app,resolver,ui,launch > gdbph.log 2>&1 || true
-            echo "=== page heap try $i:"
-            if grep -q "exited normally" gdbph.log; then echo "exited normally"; else tail -130 gdbph.log; fi
+          for i in 1 2 3; do
+            ./Murmur_sym.exe --selftest json,log,model,session,app,resolver,ui,launch > ph.log 2>&1 && code=0 || code=$?
+            echo "page heap run $i: exit code $code"
+            if [ "$code" != 0 ]; then
+              echo "--- the end of the output:"
+              tail -50 ph.log
+              echo "--- the calls, as functions:"
+              bash symbolize.sh ph.log
+              break
+            fi
           done
 
   release:

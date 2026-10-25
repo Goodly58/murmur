@@ -8,6 +8,7 @@
 
 #include "audio.h"
 #include "common.h"
+#include "crash.h"
 #include "net.h"
 #include "setup.h"
 #include "tests.h"
@@ -234,6 +235,14 @@ int runToolsTest(const wstring& dir) {
   ok = ok && !leftover;
   std::printf("%s after %.0f s\n", ok ? "TOOLS TEST OK" : "TOOLS TEST FAILED", secs);
   return ok ? 0 : 1;
+}
+
+// `Murmur.exe --crash-test`: writes through a null pointer, so the crash handler has something to report.
+int runCrashTest() {
+  if (!GetEnvironmentVariableW(L"MURMUR_DATA", nullptr, 0)) crashLogTo(L"");  // a deliberate crash must not leave a note in the real folder
+  volatile int* nothing = nullptr;
+  *nothing = 1;
+  return 0;
 }
 
 // `Murmur.exe --update-test <folder>`: the daily yt-dlp update against the real GitHub. The folder must already hold an

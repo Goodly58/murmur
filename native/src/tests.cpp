@@ -2,6 +2,7 @@
 
 #include "app.h"
 #include "audio.h"
+#include "crash.h"
 #include "data.h"
 #include "dsp.h"
 #include "fft.h"
@@ -853,6 +854,27 @@ void testLog(TestLog& t) {
   t.check("log: a line starts with the date and the time", dated, text.substr(start, 40));
 }
 
+// A crash must leave a note: this runs the program itself with --crash-test and reads what it printed and kept.
+void testCrash(TestLog& t) {
+  wchar_t self[MAX_PATH * 2];
+  const DWORD len = GetModuleFileNameW(nullptr, self, MAX_PATH * 2);
+  string out;
+  int code = 0;
+  const bool ran = runCapture(L"\"" + wstring(self, len) + L"\" --crash-test", out, 30000, &code);
+  t.check("crash: the program dies on the exception", ran && (unsigned)code == 0xC0000005u, fmt("exit 0x%08X", (unsigned)code));
+  t.check("crash: it says what the exception was and which address it touched",
+          out.find("exception 0xC0000005") != string::npos && out.find("(writing address 0x0)") != string::npos, out.substr(0, 160));
+  t.check("crash: it lists the calls that led there", out.find(".exe+0x") != string::npos, out);
+  string kept;
+  if (FILE* f = _wfopen((appDataDir() + L"\\crash.log").c_str(), L"rb")) {
+    char b[4096];
+    size_t n;
+    while ((n = fread(b, 1, sizeof b, f)) > 0) kept.append(b, n);
+    fclose(f);
+  }
+  t.check("crash: the note is kept in crash.log, here in the tests' scratch folder", kept.find("crash: exception 0xC0000005") != string::npos);
+}
+
 // While the self-tests run, MURMUR_DATA points at a scratch folder: nothing they do may reach the real log.
 struct ScratchData {
   wstring dir;
@@ -863,6 +885,7 @@ struct ScratchData {
     removeTree(dir);
     SHCreateDirectoryExW(nullptr, dir.c_str(), nullptr);
     SetEnvironmentVariableW(L"MURMUR_DATA", dir.c_str());
+    crashLogTo(dir + L"\\crash.log");
   }
   ~ScratchData() {
     SetEnvironmentVariableW(L"MURMUR_DATA", nullptr);
@@ -881,6 +904,7 @@ int runSelfTests(const string& only) {
   if (only == "stream-live") { testStreamLive(t); std::printf("\n%s: %d passed, %d failed\n", t.failed ? "FAILED" : "ALL PASSED", t.passed, t.failed); return t.failed ? 1 : 0; }
   if (want("json")) testJson(t);
   if (want("log")) testLog(t);
+  if (want("crash")) testCrash(t);
   if (want("model")) testModel(t);
   if (want("session")) testSession(t);
   if (want("app")) testApp(t);
