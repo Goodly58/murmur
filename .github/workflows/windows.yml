@@ -149,6 +149,48 @@ jobs:
           echo "### ${{ matrix.os }}" >> "$GITHUB_STEP_SUMMARY"
           tail -n 1 selftest.log >> "$GITHUB_STEP_SUMMARY" || true
 
+  # TEMPORARY: runs the dev exe under gdb until it crashes, to see where the intermittent access violation is.
+  hunt:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: murmur-windows
+
+      - name: Install the pinned MinGW (for gdb)
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $archive = Join-Path $env:RUNNER_TEMP 'mingw.7z'
+          Invoke-WebRequest $env:MINGW_URL -OutFile $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:MINGW_SHA256) { throw "The MinGW download does not match its checksum ($hash)" }
+          7z x $archive "-o$env:RUNNER_TEMP" -y | Out-Null
+          Join-Path $env:RUNNER_TEMP 'mingw64\bin' | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+
+      - name: Run under gdb until it crashes
+        shell: bash
+        run: |
+          gdb --version | head -1
+          for round in $(seq 1 30); do
+            for spec in "audio 7" "ui 1"; do
+              set -- $spec
+              MURMUR_TEST_SEED=$2 gdb -batch -ex "set pagination off" -ex run -ex "thread apply all bt 25" --args ./murmur_dev.exe --selftest $1 > gdb.log 2>&1 || true
+              if ! grep -q "exited normally" gdb.log; then
+                echo "=== round $round, group $1: did not exit normally"
+                tail -90 gdb.log
+                exit 1
+              fi
+            done
+          done
+          echo "no crash in 30 rounds"
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
