@@ -175,6 +175,8 @@ jobs:
           Murmur: focus sounds that run themselves. Murmur.exe is the whole app. Run it to start, or run `Murmur.exe --install` to add it to the Start menu (no admin rights needed).
 
           It is not code-signed yet, so Windows SmartScreen may ask you to confirm the first run (More info, then Run anyway). `Murmur.exe.sha256` holds the SHA-256 to check the download against.
+
+          Code signing policy: https://github.com/Goodly58/murmur#code-signing-policy
           EOF
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" Murmur.exe Murmur.exe.sha256 --clobber --repo "$GITHUB_REPOSITORY"

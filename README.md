@@ -134,6 +134,21 @@ Each sound is synthesised once into a looping stereo buffer in a worker, so play
 
 </details>
 
+## Code signing policy
+
+Windows releases will use free code signing provided by [SignPath.io](https://about.signpath.io), with a certificate by the [SignPath Foundation](https://signpath.org). The application is pending, so until it is approved `Murmur.exe` is not signed and Windows may show a SmartScreen warning. Only `Murmur.exe` is signed, and only when the release workflow built it from this repository on GitHub-hosted runners.
+
+- Committers and reviewers: [Goodly58](https://github.com/Goodly58)
+- Approvers: [Goodly58](https://github.com/Goodly58)
+
+Murmur has one maintainer, who holds every role.
+
+## Privacy policy
+
+Murmur has no accounts, analytics or telemetry, and it sends no personal information anywhere. Your mix, timers, presets and study history stay in files on your PC (`%APPDATA%\Murmur`).
+
+It connects to the internet only for streams and their helper programs. It asks [YouTube](https://policies.google.com/privacy) which live streams are on for each scene, plays the one you pick and shows its thumbnail. It asks [GitHub](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement) for mpv and yt-dlp when you click **Set up streaming**, and then once a day for a newer yt-dlp if Murmur downloaded it. Those services see what any web request shows them, such as your IP address, and handle it under their own privacy policies.
+
 ## License
 
 [MIT](LICENSE). mpv and yt-dlp are separate programs with their own licenses; Murmur downloads them only when you click **Set up streaming**.
