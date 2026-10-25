@@ -114,9 +114,18 @@ jobs:
       - name: Self-tests of the release exe
         shell: pwsh
         run: |
-          $run = Start-Process -FilePath .\Murmur.exe -ArgumentList '--selftest' -Wait -PassThru
-          "Murmur.exe --selftest exited with $($run.ExitCode)"
-          if ($run.ExitCode -ne 0) { exit 1 }
+          $bad = $null
+          foreach ($i in 1..6) {
+            $run = Start-Process -FilePath .\Murmur.exe -ArgumentList '--selftest' -Wait -PassThru -RedirectStandardOutput "release-$i.log" -RedirectStandardError "release-$i.err"
+            "run {0}: exit code {1} (0x{1:X8}), last line: {2}" -f $i, $run.ExitCode, (Get-Content "release-$i.log" -Tail 1)
+            if ($run.ExitCode -ne 0 -and -not $bad) { $bad = $i }
+          }
+          if ($bad) {
+            "--- the end of run ${bad}'s output:"
+            Get-Content "release-$bad.log" -Tail 12
+            Get-Content "release-$bad.err"
+            exit 1
+          }
 
       - name: Draw the real window offscreen
         shell: pwsh

@@ -10,6 +10,10 @@
 namespace {
 
 void attachParentConsole() {
+  // Output that was redirected (to a file, or through a pipe) is already where the caller wants it; only a bare
+  // launch from a console needs attaching to that console.
+  const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+  if (out && out != INVALID_HANDLE_VALUE && GetFileType(out) != FILE_TYPE_UNKNOWN) return;
   if (AttachConsole(ATTACH_PARENT_PROCESS)) {
     FILE* f = nullptr;
     freopen_s(&f, "CONOUT$", "w", stdout);

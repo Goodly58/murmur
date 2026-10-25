@@ -17,7 +17,10 @@
 
 void TestLog::check(const string& name, bool ok, const string& detail) {
   (ok ? passed : failed)++;
-  if (verbose || !ok) std::printf("%s  %s%s%s\n", ok ? "PASS" : "FAIL", name.c_str(), detail.empty() ? "" : "   [", detail.empty() ? "" : (detail + "]").c_str());
+  if (verbose || !ok) {
+    std::printf("%s  %s%s%s\n", ok ? "PASS" : "FAIL", name.c_str(), detail.empty() ? "" : "   [", detail.empty() ? "" : (detail + "]").c_str());
+    std::fflush(stdout);  // a crash must not take the lines before it along (output to a file or a pipe is buffered)
+  }
 }
 
 static string fmt(const char* f, ...) {
