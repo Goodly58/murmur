@@ -37,6 +37,13 @@ struct Hit {
   bool operator!=(const Hit& o) const { return !(*this == o); }
 };
 
+// The words that explain the balance slider: what each end is, and which way the thumb is leaning.
+struct BalanceWords {
+  wstring left, right, lean;  // "Video", "Sounds", "More sounds"
+  int side = 0;               // -1 leaning to the stream (or your music), 0 in the middle, 1 leaning to the sounds
+};
+BalanceWords balanceWords(int blend, bool streamTab);
+
 struct UiHooks {
   std::function<void()> invalidateAll;
   std::function<void(const R&)> invalidate;
@@ -127,7 +134,7 @@ class Ui {
     R tabsSeg, tab[2], link, power, watch, player, setup, vbar, vPrev, vTitle, vNext, vClear;
     R linkForm, linkInput, linkGo;
     R dropzone, tracks, fbar;
-    R blendRow, blendSlider, blendL, blendR;
+    R blendRow, blendSlider, blendL, blendR, blendCap;  // blendCap: the words under the slider
     R mixLabel, reset;
     R tile[10], band[5];
     float ringPx = 0, sideContentH = 0, pTotal = 0, specH = 0, playD = 68;
@@ -154,6 +161,7 @@ class Ui {
   void paintSetup();
   void paintFiles();
   void paintMix();
+  void paintBalance();
   void paintOverlays();
   void paintMini();
   void paintTransport();

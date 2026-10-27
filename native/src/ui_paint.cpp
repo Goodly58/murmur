@@ -495,13 +495,49 @@ void Ui::paintSide() {
   }
 
   // balance between the stream or music and the sounds
-  if (visible(L.blendRow)) {
-    g.icon(m.s.tab == "stream" ? "i-video" : "i-note", L.blendL.cx(), L.blendL.cy(), 18, P.text3);
-    slider(L.blendSlider, m.s.blend);
-    g.icon("i-pink", L.blendR.cx(), L.blendR.cy(), 18, P.text3);
-  }
+  if (visible(L.blendRow) || visible(L.blendCap)) paintBalance();
   paintMix();
   g.popClip();
+}
+
+// The balance between the stream (or your music) and the sounds. Each side has a colour of its own, on its icon, on
+// the word under the track and on its half of the track, and the thumb takes the colour of the side it leans to, so
+// it is plain which way you are dragging.
+void Ui::paintBalance() {
+  const Palette& P = g.pal;
+  const int blend = clampi(app.model.s.blend, 0, 100);
+  const bool streamTab = app.model.s.tab == "stream";
+  const BalanceWords words = balanceWords(blend, streamTab);
+  const Color cL = P.accent, cR = P.calm;
+  const Color lean = words.side < 0 ? cL : words.side > 0 ? cR : P.text;
+
+  if (visible(L.blendRow)) {
+    g.icon(streamTab ? "i-video" : "i-note", L.blendL.cx(), L.blendL.cy(), 18, cL);
+    g.icon("i-pink", L.blendR.cx(), L.blendR.cy(), 18, cR);
+
+    // the track: each half tinted with its side's colour, a notch in the middle, a bar from the middle to the thumb
+    const R r = L.blendSlider;
+    const float x0 = r.x + 7, x1 = r.r() - 7, mid = (x0 + x1) / 2, tx = x0 + (x1 - x0) * blend / 100.f, cy = r.cy();
+    g.fillRound({r.x, cy - 2, mid - r.x, 4}, 2, A(cL, .3f));
+    g.fillRound({mid, cy - 2, r.r() - mid, 4}, 2, A(cR, .3f));
+    const float a = std::min(mid, tx), b = std::max(mid, tx);
+    if (b - a > 0.5f) g.fillRound({a, cy - 2, b - a, 4}, 2, lean);
+    g.fill({mid - 0.5f, cy - 6, 1, 12}, P.text3);
+    const bool drag = sliderDrag_ == H_BLEND;
+    g.fillCircle(tx, cy, drag ? 12.f : 10.f, P.bg);
+    g.fillCircle(tx, cy, drag ? 8.5f : 7.f, lean);
+  }
+
+  // the words under the track: what each end is, and which way the thumb is leaning
+  if (visible(L.blendCap)) {
+    TextStyle w = T(11.5f, 600, cL);
+    w.spacing = .02f;
+    g.text(words.left, L.blendCap, w);
+    w.color = cR;
+    w.align = TX_RIGHT;
+    g.text(words.right, L.blendCap, w);
+    g.text(words.lean, L.blendCap, T(11.5f, 500, words.side == 0 ? P.text3 : lean, TX_CENTER));
+  }
 }
 
 void Ui::paintPlayer() {

@@ -46,6 +46,80 @@ int countKind(Ui& ui, HitKind k) {
   return n;
 }
 
+// The balance slider says which side is which: each end has a colour and a word of its own, and the thumb takes the
+// colour of the side it leans to.
+void testBalance(TestLog& t, Rig& r) {
+  Ui& ui = *r.ui;
+  App& app = *r.app;
+  auto col = [](Color c) { return Pix{(int)std::lround(c.r * 255), (int)std::lround(c.g * 255), (int)std::lround(c.b * 255)}; };
+
+  const BalanceWords v0 = balanceWords(0, true), v20 = balanceWords(20, true), v50 = balanceWords(50, true), v76 = balanceWords(76, true),
+                     v100 = balanceWords(100, true), m20 = balanceWords(20, false);
+  t.check("balance: the ends are named after what they control", v50.left == L"Video" && v50.right == L"Sounds" && m20.left == L"Music" && m20.right == L"Sounds");
+  t.check("balance: it says which way it leans", v20.lean == L"More video" && v20.side == -1 && v76.lean == L"More sounds" && v76.side == 1 && v50.lean == L"Even" && v50.side == 0);
+  t.check("balance: and when one side is all there is", v0.lean == L"Video only" && v100.lean == L"Sounds only" && m20.lean == L"More music");
+  t.check("balance: a little either side of the middle still reads as even",
+          balanceWords(48, true).side == 0 && balanceWords(52, true).side == 0 && balanceWords(47, true).side == -1 && balanceWords(53, true).side == 1);
+
+  app.selectScene("focus");
+  app.setTab("stream");
+  app.stopAll();
+  ui.setSize(1180, 760);
+  ui.changed();
+  const Hit b = ui.find(H_BLEND);
+  t.check("balance: the tip names the two sides", b.k == H_BLEND && b.tip.find(L"left is the video") != wstring::npos && b.tip.find(L"right is the sounds") != wstring::npos, narrow(b.tip));
+  const float cy = b.r.cy(), x0 = b.r.x + 7, x1 = b.r.r() - 7, mid = (x0 + x1) / 2, sx = b.r.x - 28, ex = b.r.r() + 28;
+  auto thumbX = [&](int v) { return x0 + (x1 - x0) * v / 100.f; };
+  auto hasColor = [&](const vector<uint8_t>& px, UINT pw, float xa, float ya, float xb, float yb, Pix want, int tol) {
+    for (int y = (int)ya; y <= (int)yb; y++)
+      for (int x = (int)xa; x <= (int)xb; x++) if (closeTo(at(px, pw, x, y), want, tol)) return true;
+    return false;
+  };
+
+  for (const bool dark : {true, false}) {
+    ui.setTheme(dark);
+    const Palette P = paletteFor(dark);
+    const string theme = dark ? "dark" : "light";
+    vector<uint8_t> px;
+    UINT pw = 0, ph = 0;
+
+    app.setBlend(20);
+    render(r, 1, px, pw, ph);
+    t.check("balance (" + theme + "): leaning to the video, the thumb is the video's colour", closeTo(at(px, pw, (int)thumbX(20), (int)cy), col(P.accent), 4), pixStr(at(px, pw, (int)thumbX(20), (int)cy)));
+    t.check("balance (" + theme + "): and a bar of that colour runs from the middle to it", closeTo(at(px, pw, (int)((thumbX(20) + mid) / 2), (int)cy), col(P.accent), 4));
+    app.setBlend(80);
+    render(r, 1, px, pw, ph);
+    t.check("balance (" + theme + "): leaning to the sounds, the thumb is the sounds' colour", closeTo(at(px, pw, (int)thumbX(80), (int)cy), col(P.calm), 4), pixStr(at(px, pw, (int)thumbX(80), (int)cy)));
+    t.check("balance (" + theme + "): and so is the bar", closeTo(at(px, pw, (int)((thumbX(80) + mid) / 2), (int)cy), col(P.calm), 4));
+    app.setBlend(50);
+    render(r, 1, px, pw, ph);
+    t.check("balance (" + theme + "): in the middle the thumb is neutral and there is no bar",
+            closeTo(at(px, pw, (int)thumbX(50), (int)cy), col(P.text), 4) && !closeTo(at(px, pw, (int)((x0 + mid) / 2), (int)cy), col(P.accent), 40) &&
+                !closeTo(at(px, pw, (int)((mid + x1) / 2), (int)cy), col(P.calm), 40));
+    const Pix leftTrack = at(px, pw, (int)((x0 + mid) / 2), (int)cy), rightTrack = at(px, pw, (int)((mid + x1) / 2), (int)cy);
+    t.check("balance (" + theme + "): each half of the track is tinted with its side's colour",
+            (dark ? leftTrack.r > leftTrack.b + 20 && rightTrack.g > rightTrack.r + 15 : leftTrack.r > leftTrack.b + 10 && rightTrack.g > rightTrack.r + 5),
+            pixStr(leftTrack) + " | " + pixStr(rightTrack));
+    t.check("balance (" + theme + "): the end icons carry the same two colours",
+            hasColor(px, pw, sx, cy - 9, sx + 18, cy + 9, col(P.accent), 40) && !hasColor(px, pw, sx, cy - 9, sx + 18, cy + 9, col(P.calm), 40) &&
+                hasColor(px, pw, ex - 18, cy - 9, ex, cy + 9, col(P.calm), 40) && !hasColor(px, pw, ex - 18, cy - 9, ex, cy + 9, col(P.accent), 40));
+    t.check("balance (" + theme + "): and so do the words under them",
+            hasColor(px, pw, sx, cy + 11, sx + 70, cy + 27, col(P.accent), 50) && !hasColor(px, pw, sx, cy + 11, sx + 70, cy + 27, col(P.calm), 50) &&
+                hasColor(px, pw, ex - 70, cy + 11, ex, cy + 27, col(P.calm), 50) && !hasColor(px, pw, ex - 70, cy + 11, ex, cy + 27, col(P.accent), 50));
+  }
+  ui.setTheme(true);
+
+  const Hit tile = ui.find(H_TILE, 0);
+  t.check("balance: the sound tiles still start below the words and fit the window", tile.k == H_TILE && tile.r.y > cy + 27 + 10 && ui.find(H_TILE, 9).r.b() <= ui.height(),
+          std::to_string(tile.r.y) + " vs " + std::to_string(cy + 27));
+  app.setTab("files");
+  ui.changed();
+  t.check("balance: with your own music the tip says music", ui.find(H_BLEND).tip.find(L"left is your music") != wstring::npos, narrow(ui.find(H_BLEND).tip));
+  app.setTab("stream");
+  ui.changed();
+  app.setBlend(50);
+}
+
 }  // namespace
 
 void testUi(TestLog& t) {
@@ -146,6 +220,7 @@ void testUi(TestLog& t) {
     t.check("ui: the balance slider moves toward the sounds", std::abs(app.model.s.blend - 80) <= 1, std::to_string(app.model.s.blend));
     app.setBlend(50);
   }
+  testBalance(t, r);
 
   // ---- presets
   app.selectScene("read");

@@ -22,6 +22,19 @@ wstring fmtClock(int64_t ms, bool up) {
   return buf;
 }
 
+BalanceWords balanceWords(int blend, bool streamTab) {
+  BalanceWords w;
+  w.left = streamTab ? L"Video" : L"Music";
+  w.right = L"Sounds";
+  const wstring leftLower = streamTab ? L"video" : L"music";
+  if (blend <= 2) { w.lean = w.left + L" only"; w.side = -1; }
+  else if (blend < 48) { w.lean = L"More " + leftLower; w.side = -1; }
+  else if (blend <= 52) { w.lean = L"Even"; w.side = 0; }
+  else if (blend < 98) { w.lean = L"More sounds"; w.side = 1; }
+  else { w.lean = L"Sounds only"; w.side = 1; }
+  return w;
+}
+
 Ui::Ui(App& a, Gfx& gfx, Spectrum& s) : app(a), g(gfx), spec(s) {}
 
 void Ui::add(HitKind k, int i, const R& r, const wstring& tip) {
@@ -265,7 +278,8 @@ void Ui::build() {
     L.blendL = {sx, y + 1, 18, 18};
     L.blendR = {sx + sw - 18, y + 1, 18, 18};
     L.blendSlider = {sx + 28, y, sw - 56, 20};
-    y += 20 + 22;
+    L.blendCap = {sx, y + 21, sw, 16};
+    y += 20 + 29;
     L.mixLabel = {sx, y, 60, 32};
     L.reset = {sx + sw - 32, y, 32, 32};
     y += 32 + 10;
@@ -341,7 +355,7 @@ void Ui::build() {
       addSide(H_FCLEAR, 0, L.vClear, L"Clear");
     }
   }
-  addSide(H_BLEND, 0, L.blendSlider.inset(0, -4), L"Video / music ↔ sounds");
+  addSide(H_BLEND, 0, L.blendSlider.inset(0, -4), m.s.tab == "stream" ? L"Balance: left is the video, right is the sounds" : L"Balance: left is your music, right is the sounds");
   const bool modified = m.mixModified();
   if (modified) addSide(H_RESET, 0, L.reset, L"Reset mix");
   if (!brk) {
