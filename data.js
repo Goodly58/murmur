@@ -45,6 +45,9 @@ export const PLANS = {
   t90:  { label: '90m', phases: [{ kind: 'timer', ms: 90 * MIN }], fadeMs: 60000 }
 };
 
+/* Plans with rounds (25·5 and the like) can loop: after the last round they start over instead of ending. */
+export const hasRounds = id => !!(PLANS[id] && PLANS[id].phases && PLANS[id].phases.filter(p => p.kind === 'focus').length > 1);
+
 /* What plays during a break: a softer mix with no beats. */
 export const BREAK_MIX = { ocean: 34, wind: 12, rain: 10 };
 

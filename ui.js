@@ -1,5 +1,5 @@
 /* Murmur UI: wires the scenes, session ring, mix tiles, media panel and spectrum to the engine. */
-import { CHANNELS, BANDS, PLANS, SCENES, BREAK_MIX } from './data.js';
+import { CHANNELS, BANDS, PLANS, SCENES, BREAK_MIX, hasRounds } from './data.js';
 import { engine } from './engine.js';
 import { Session } from './session.js';
 import { video, parseYouTube, norm, keyOf } from './video.js';
@@ -21,7 +21,7 @@ const PRESET_ID = /^c[A-Za-z0-9]{2,20}$/;
 
 function loadState() {
   const d = { scene: 'focus', plans: {}, mixes: {}, beats: {}, presets: [], beatsMode: 'binaural', master: 70, blend: 50,
-    videoOn: true, custom: null, tab: 'video', wide: false, log: {} };
+    repeat: false, videoOn: true, custom: null, tab: 'video', wide: false, log: {} };
   let s = null;
   try { s = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { /* storage unavailable */ }
   if (!s || typeof s !== 'object') return d;
@@ -62,6 +62,7 @@ function loadState() {
   if (['off', 'binaural', 'isochronic'].includes(s.beatsMode)) d.beatsMode = s.beatsMode;
   d.master = num(s.master, 0, 100, 70);
   d.blend = num(s.blend, 0, 100, 50);
+  d.repeat = s.repeat === true;
   d.videoOn = s.videoOn !== false;
   d.tab = s.tab === 'files' ? 'files' : 'video';
   d.wide = !!s.wide;
@@ -254,6 +255,18 @@ function selectPlan(id) {
   paintStage(session.snapshot());
   if (running) { session.start(); applyAudio(1.2); }
   save();
+}
+
+/* Loop: a plan with rounds (25·5, 50·10, 15·3) starts over after its last round instead of ending. One setting for
+   every scene; timers and the open-ended plan ignore it. */
+function toggleLoop() {
+  S.repeat = !S.repeat;
+  session.setLoop(S.repeat);
+  paintLoop();
+  paintStage(session.snapshot());
+  save();
+  // the setting is kept, but a plan without rounds has nothing to loop: say so instead of looking like nothing happened
+  if (!hasRounds(planId())) toast(S.repeat ? 'Loop is on for the timed rounds, like 25·5' : 'Loop is off');
 }
 
 /* ---------------- mix ---------------- */
@@ -618,13 +631,14 @@ function paintStage(snap) {
   $$('#ticks line').forEach((l, i) => l.classList.toggle('on', i < lit));
 
   const dots = $('#dots');
-  const sig = `${snap.rounds}:${snap.round}:${kind}`;
+  const sig = `${snap.rounds}:${snap.round}:${kind}:${snap.loop}`;
   if (sig !== lastPaint) {
     lastPaint = sig;
     if (snap.cycle) {
       const doneCount = snap.done ? snap.rounds : snap.kind === 'break' ? snap.round : snap.round - 1;
       dots.innerHTML = Array.from({ length: snap.rounds }, (_, i) =>
-        `<i class="${i < doneCount ? 'done' : (i === snap.round - 1 && snap.kind === 'focus' ? 'cur' : '')}"></i>`).join('');
+        `<i class="${i < doneCount ? 'done' : (i === snap.round - 1 && snap.kind === 'focus' ? 'cur' : '')}"></i>`).join('') +
+        (snap.loop ? ic('i-repeat', 'loop-mark') : '');   // looping: a small repeat mark after the dots
     } else dots.innerHTML = '';
   }
   $('#next').disabled = !snap.cycle || snap.done;
@@ -645,6 +659,19 @@ function renderPlans() {
   // the first entry stays the default; the unlimited option is always listed last
   $('#plans').innerHTML = [...scene().plans].sort((a, b) => (a === 'free') - (b === 'free')).map(p =>
     `<button type="button" role="radio" data-plan="${p}" aria-checked="${p === cur}">${PLANS[p].label}</button>`).join('');
+  paintLoop();
+}
+
+/* The loop button beside the plans: only on scenes that have a plan with rounds, lit when the rounds loop, faded when
+   the chosen plan has none to loop. */
+function paintLoop() {
+  const usable = hasRounds(planId());
+  $('#loopSeg').hidden = !scene().plans.some(hasRounds);
+  $('#loopSeg').dataset.idle = String(!usable);
+  const b = $('#loop');
+  b.setAttribute('aria-pressed', String(S.repeat));
+  b.title = !usable ? 'Loop needs timed rounds, like 25·5 (R)'
+    : S.repeat ? 'Looping: click to stop after the last round (R)' : 'Loop the rounds: start over after the last one (R)';
 }
 
 function paintMix() {
@@ -787,6 +814,7 @@ function openSheet(id) { const d = $(id); if (!d.open) d.showModal(); }
 function bind() {
   $('#scenes').addEventListener('click', e => { const b = e.target.closest('.scene'); if (b) selectScene(b.dataset.scene); });
   $('#plans').addEventListener('click', e => { const b = e.target.closest('button'); if (b) selectPlan(b.dataset.plan); });
+  $('#loop').addEventListener('click', toggleLoop);
   $('#play').addEventListener('click', togglePlay);
   $('#prev').addEventListener('click', () => { session.restartPhase(); if (!running) startAll(); });
   $('#next').addEventListener('click', () => { session.skip(); if (!running && !session.snapshot().done) startAll(); });
@@ -897,6 +925,7 @@ function onKey(e) {
       break;
     case 'm': case 'M': toggleMute(); break;
     case 'b': case 'B': setBeatsMode({ off: 'binaural', binaural: 'isochronic', isochronic: 'off' }[S.beatsMode]); break;
+    case 'r': case 'R': toggleLoop(); break;
     case 'v': case 'V': S.videoOn = !S.videoOn; syncVideo(running); save(); break;
     case '?': openSheet('#sheetKeys'); break;
     default:
@@ -925,6 +954,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 const spectrum = createSpectrum($('#spectrum'), () => engine.analyser, () => running && !!engine.ctx && engine.ctx.state === 'running');
 
 build();
+session.setLoop(S.repeat);
 session.setPlan(planId());
 renderPlans();
 renderPresets();

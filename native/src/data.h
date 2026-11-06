@@ -40,6 +40,7 @@ struct PlanDef {
   int64_t fadeMs = 0;       // fade-out at the end of a timer
 };
 const PlanDef* findPlan(const string& id);
+bool planHasRounds(const string& id);  // more than one focus block (25·5 and the like): the plans that can loop
 
 struct BeatDef {
   int band = 2;  // index into BANDS

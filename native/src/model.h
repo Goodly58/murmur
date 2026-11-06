@@ -23,6 +23,7 @@ struct State {
   vector<Preset> presets;
   int beatsMode = 1;                // 0 off, 1 binaural, 2 isochronic
   int master = 70, blend = 50;
+  bool repeat = false;              // loop the rounds of a plan like 25·5 instead of stopping after the last
   bool streamOn = true;
   string custom;                    // pinned stream spec from a pasted link ("" = none)
   string tab = "stream";            // "stream" or "files"

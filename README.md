@@ -36,6 +36,7 @@ native\bin\Murmur.exe --install
 
 <p align="center"><img src="docs/mini.png" alt="Mini player" width="24%">&nbsp;&nbsp;&nbsp;<img src="docs/windows-light.png" alt="Light theme" width="62%"></p>
 
+- **R** loops the rounds, so Focus goes round again after the last one instead of stopping. The button beside the plans does the same.
 - **N** shrinks it to a mini player that stays on top while you work.
 - **Right-click the taskbar icon** for one-click sessions, like Sprint 15 · 3.
 - **Hover the taskbar icon** for previous, play and next.
@@ -53,6 +54,7 @@ Add these after `Murmur.exe` (it lives in `%LOCALAPPDATA%\Programs\Murmur`), in 
 | `--scene sleep` | Picks the scene: `focus` `sprint` `read` `create` `mask` `white` `calm` `sleep` |
 | `--plan t60` | Picks the timing: `p25` 25·5, `p50` 50·10, `p15` 15·3, `t10` `t20` `t30` `t60` `t90` minute timers, `free` no timer |
 | `--play` | Starts playing straight away |
+| `--loop` or `--no-loop` | Turns looping the rounds on or off (it applies to `p25`, `p50` and `p15`) |
 | `--mini` or `--full` | Opens the mini player or the full window |
 | a YouTube link or music files | Plays them instead of the scene's stream |
 

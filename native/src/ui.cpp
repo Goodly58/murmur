@@ -188,7 +188,14 @@ void Ui::build() {
     bw.push_back(w);
     segW += w;
   }
-  L.planSeg = {mid - segW / 2, top, segW, segH};
+  // The plans and, beside them, the loop button (only on scenes that have a plan with rounds). They are centred as one
+  // group, so the plans do not slide sideways when you change scenes.
+  bool anyRounds = false;
+  for (auto& id : L.planIds) anyRounds = anyRounds || planHasRounds(id);
+  const float loopW = anyRounds ? segH : 0, loopGap = anyRounds ? 8.f : 0;
+  const float groupX = mid - (segW + loopGap + loopW) / 2;
+  L.planSeg = {groupX, top, segW, segH};
+  if (anyRounds) L.loopBtn = {L.planSeg.r() + loopGap, top, loopW, segH};
   float bx = L.planSeg.x + 3;
   for (float w : bw) { L.plan.push_back({bx, L.planSeg.y + 3, w, 28}); bx += w + 2; }
   const float ringTop = top + segH + gap;
@@ -320,6 +327,11 @@ void Ui::build() {
 
   for (int i = 0; i < NSCENES; i++) add(H_SCENE, i, L.scene[i], stock[(size_t)i].name + L" (" + std::to_wstring(i + 1) + L")");
   for (size_t i = 0; i < L.plan.size(); i++) add(H_PLAN, (int)i, L.plan[i]);
+  if (L.loopBtn.w > 0) {
+    const bool usable = planHasRounds(m.planId());
+    add(H_LOOP, 0, L.loopBtn,
+        !usable ? L"Loop needs timed rounds, like 25·5 (R)" : m.s.repeat ? L"Looping: click to stop after the last round (R)" : L"Loop the rounds: start over after the last one (R)");
+  }
   add(H_PREV, 0, L.prev, L"Restart phase (←)");
   add(H_PLAY, 0, L.play, L"Play / pause (Space)");
   if (snap.cycle && !snap.done) add(H_NEXT, 0, L.next, L"Skip phase (→)");
@@ -590,6 +602,7 @@ bool Ui::key(int vk, bool ctrl, bool shift) {
     case VK_DOWN: app.setMaster(app.model.s.master - 5); return true;
     case 'M': app.toggleMute(); return true;
     case 'B': app.cycleBeatsMode(); return true;
+    case 'R': app.toggleLoop(); return true;
     case 'V': app.toggleVideoWindow(); return true;
     case 'N': if (hooks.toggleMini) hooks.toggleMini(); return true;
     case VK_OEM_2: if (shift) { openSheet(2); return true; } return false;
@@ -646,6 +659,7 @@ void Ui::activate(const Hit& h) {
   switch (h.k) {
     case H_SCENE: app.selectScene(stockScenes()[(size_t)h.i].id); break;
     case H_PLAN: if ((size_t)h.i < L.planIds.size()) app.selectPlan(L.planIds[(size_t)h.i]); break;
+    case H_LOOP: app.toggleLoop(); break;
     case H_PREV: app.prevPhase(); break;
     case H_NEXT: app.nextPhase(); break;
     case H_PLAY: app.togglePlay(); break;

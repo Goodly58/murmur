@@ -420,6 +420,116 @@ void testSession(TestLog& t) {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// Loop: the rounds of 25·5 and the like start over instead of ending.
+// ---------------------------------------------------------------------------------------------------
+
+void testSessionLoop(TestLog& t) {
+  int64_t clock = 1000000;
+  struct Rec { int phases = 0, dones = 0; vector<PhaseKind> kinds; SessionSnap last; } r;
+  Session::Hooks h;
+  h.onTick = [&](const SessionSnap& s) { r.last = s; };
+  h.onPhase = [&](const SessionSnap& s, PhaseKind) { r.phases++; r.kinds.push_back(s.kind); r.last = s; };
+  h.onDone = [&](const SessionSnap& s) { r.dones++; r.last = s; };
+  Session s(h, [&] { return clock; });
+  auto advance = [&](int64_t ms) { clock += ms; s.tick(); };
+  const int64_t MIN = 60000;
+
+  s.setPlan("p25");
+  t.check("loop: off to begin with, so a plan ends after its last round", !s.loop() && !s.snapshot().loop && s.snapshot().lap == 0);
+  s.setLoop(true);
+  t.check("loop: a plan with rounds says it is looping", s.loop() && s.snapshot().loop);
+
+  // 25 focus + 5 break, three times, then the fourth focus: 115 minutes
+  s.start();
+  advance(115 * MIN);
+  SessionSnap a = s.snapshot();
+  t.check("loop: after the last round comes one more break, not the end", !s.done() && s.running() && r.dones == 0 && a.kind == PH_BREAK && a.duration == 5 * MIN && a.elapsed == 0,
+          fmt("kind %d, %d ms", (int)a.kind, (int)a.duration));
+  t.check("loop: that break shows every round done", a.round == 4 && a.rounds == 4 && a.index == 7 && r.phases == 7, fmt("round %d, index %d, %d phases", a.round, a.index, r.phases));
+  advance(5 * MIN);
+  a = s.snapshot();
+  t.check("loop: then the first round begins again", a.kind == PH_FOCUS && a.round == 1 && a.index == 0 && a.lap == 1 && a.duration == 25 * MIN && !s.done() && r.dones == 0);
+  t.check("loop: the start of a round is announced as a focus phase", r.kinds.back() == PH_FOCUS && r.phases == 8);
+  advance(120 * MIN);
+  a = s.snapshot();
+  t.check("loop: and it goes round again, lap after lap", a.kind == PH_FOCUS && a.round == 1 && a.lap == 2 && r.dones == 0);
+
+  // skipping walks through the break at the end of a lap too
+  s.setPlan("p25");
+  s.start();
+  for (int i = 0; i < 6; i++) s.skip();
+  t.check("loop: skip reaches the last round", s.snapshot().kind == PH_FOCUS && s.snapshot().round == 4);
+  s.skip();
+  t.check("loop: skip from the last round goes to the closing break", s.snapshot().kind == PH_BREAK && s.snapshot().index == 7 && !s.done());
+  s.skip();
+  t.check("loop: and from that break to the next lap", s.snapshot().kind == PH_FOCUS && s.snapshot().round == 1 && s.snapshot().lap == 1);
+
+  // turning it off in the closing break lets that break finish, then the plan ends
+  s.setPlan("p25");
+  s.start();
+  advance(116 * MIN);
+  const int donesBefore = r.dones;
+  t.check("loop: in the closing break", s.snapshot().kind == PH_BREAK && s.snapshot().index == 7);
+  s.setLoop(false);
+  t.check("loop: turned off, the break carries on", s.running() && !s.done() && !s.snapshot().loop);
+  advance(4 * MIN + 1000);
+  t.check("loop: and then the plan ends once", s.done() && !s.running() && r.dones == donesBefore + 1 && s.snapshot().kind == PH_BREAK && s.snapshot().round == 4);
+  s.start();
+  t.check("loop: play after that starts the plan again", !s.done() && s.snapshot().round == 1 && s.snapshot().lap == 0);
+
+  // turning it on in the last round, and off in it
+  s.setLoop(false);
+  s.setPlan("p25");
+  s.start();
+  advance(110 * MIN);
+  t.check("loop: in the last round with loop off", s.snapshot().kind == PH_FOCUS && s.snapshot().round == 4);
+  s.setLoop(true);
+  advance(5 * MIN);
+  t.check("loop: turned on there, the round ends in the closing break", s.snapshot().kind == PH_BREAK && s.snapshot().index == 7 && !s.done());
+  s.setPlan("p25");
+  s.setLoop(false);
+  s.start();
+  advance(115 * MIN);
+  t.check("loop: without it the last round is the end", s.done() && s.snapshot().kind == PH_FOCUS);
+
+  // the other plans: the break after the last round is as long as the plan's own
+  s.setLoop(true);
+  s.setPlan("p50");
+  s.start();
+  advance((50 + 10 + 50 + 10 + 50) * MIN);
+  t.check("loop: 50·10 closes with a ten minute break", s.snapshot().kind == PH_BREAK && s.snapshot().duration == 10 * MIN && s.snapshot().rounds == 3);
+  s.setPlan("p15");
+  s.start();
+  advance((15 * 4 + 3 * 3) * MIN);
+  t.check("loop: 15·3 closes with a three minute break", s.snapshot().kind == PH_BREAK && s.snapshot().duration == 3 * MIN && s.snapshot().rounds == 4);
+
+  // plans without rounds ignore it, and the setting stays for the next plan with rounds
+  s.setPlan("t30");
+  t.check("loop: a timer is not looped", s.loop() && !s.snapshot().loop);
+  s.start();
+  advance(31 * MIN);
+  t.check("loop: so it ends when the time is up", s.done() && !s.running());
+  s.setPlan("free");
+  t.check("loop: the open-ended plan is not looped", !s.snapshot().loop);
+  s.setPlan("p25");
+  t.check("loop: the setting waits for the next plan with rounds", s.loop() && s.snapshot().loop && s.snapshot().lap == 0 && s.snapshot().index == 0);
+
+  // a long gap (the PC slept) crosses laps without replaying each of them
+  s.setPlan("p25");
+  const int phasesBefore = r.phases;
+  s.start();
+  advance(250 * MIN);
+  a = s.snapshot();
+  t.check("loop: a gap of 250 minutes lands two laps and ten minutes in", a.lap == 2 && a.round == 1 && a.kind == PH_FOCUS && a.elapsed == 10 * MIN && !s.done(),
+          fmt("lap %d, round %d, %d min", a.lap, a.round, (int)(a.elapsed / MIN)));
+  t.check("loop: and only the last lap's phases were announced", r.phases - phasesBefore <= 9, std::to_string(r.phases - phasesBefore));
+  s.pause();
+  clock += 5 * MIN;
+  s.start();
+  t.check("loop: pausing keeps the lap", s.snapshot().lap == 2 && s.snapshot().elapsed < 10 * MIN + 5000);
+}
+
+// ---------------------------------------------------------------------------------------------------
 // Model: scenes, presets, persistence, links, statistics.
 // ---------------------------------------------------------------------------------------------------
 
@@ -538,6 +648,8 @@ void testModel(TestLog& t) {
   m.s.beatsMode = 2;
   m.s.master = 55;
   m.s.blend = 30;
+  t.check("model: loop is off until it is turned on", !Model().s.repeat && !m.s.repeat);
+  m.s.repeat = true;
   m.s.custom = "dQw4w9WgXcQ";
   m.s.winX = 100; m.s.winY = 50; m.s.winW = 1200; m.s.winH = 800;
   m.addFocus(90 * 60000);
@@ -547,6 +659,10 @@ void testModel(TestLog& t) {
   t.check("model: state round-trips", back.serialize() == json);
   t.check("model: presets survive", back.s.presets.size() == m.s.presets.size() && back.s.scene == m.s.scene && back.mixOf() == m.mixOf());
   t.check("model: settings survive", back.s.beatsMode == 2 && back.s.master == 55 && back.s.blend == 30 && back.s.custom == "dQw4w9WgXcQ" && back.s.winW == 1200);
+  t.check("model: the loop setting survives", back.s.repeat && json.find("\"repeat\"") != string::npos);
+  State loopState;
+  t.check("model: a loop value that is not a boolean means off", Model::parse("{\"repeat\":\"yes\"}", loopState) && !loopState.repeat && Model::parse("{\"repeat\":1}", loopState) && !loopState.repeat);
+  t.check("model: an old file without it means off", Model::parse("{\"scene\":\"focus\"}", loopState) && !loopState.repeat);
 
   // hostile or damaged files
   State st;
@@ -748,6 +864,102 @@ void testApp(TestLog& t) {
   t.check("app: back to the stream tab", app.model.s.tab == "stream");
 
   t.check("app: the window was told about changes", changes > 20, std::to_string(changes));
+}
+
+// Loop through the controller: the button, a session that keeps going, the saved setting and the launch options.
+void testAppLoop(TestLog& t) {
+  Engine eng;
+  eng.start(false, 48000);
+  Stream st;
+  st.setDryRun(true);
+  st.configure(L"mpv.exe", L"yt-dlp.exe");
+  App app(eng, st);
+  int64_t clock = 5000000;
+  time_t today = 1760000000;
+  app.session.setClock([&] { return clock; });
+  app.model.nowFn = [&] { return today; };
+  int saves = 0;
+  app.onSave = [&] { saves++; };
+  app.init();
+  auto adv = [&](int64_t ms) { clock += ms; app.tick(); };
+  const int64_t MIN = 60000;
+
+  t.check("app loop: off to begin with", !app.model.s.repeat && !app.session.loop());
+  app.selectScene("focus");
+  adv(1000);
+  saves = 0;
+  app.toggleLoop();
+  t.check("app loop: the toggle turns it on in the model and the session, and saves it",
+          app.model.s.repeat && app.session.loop() && app.session.snapshot().loop && saves > 0);
+  t.check("app loop: on a plan with rounds it needs no explanation", !app.toast.active());
+
+  // the four rounds of 25·5 and a minute more
+  adv(115 * MIN);
+  t.check("app loop: the last round does not end the session or fade it out", app.running && !app.closing && !app.session.done());
+  t.check("app loop: the closing break plays the break mix without beats",
+          app.session.snapshot().kind == PH_BREAK && app.effective().levels == BREAK_MIX && app.effective().beat.mode == 0);
+  adv(5 * MIN);
+  t.check("app loop: the focus mix and beats come back for the next lap",
+          app.session.snapshot().kind == PH_FOCUS && app.session.snapshot().lap == 1 && app.effective().levels[(size_t)channelIndex("brown")] == 45 && app.effective().beat.mode == 1 && app.running);
+  t.check("app loop: study time keeps counting", app.model.todayMinutes() > 100, fmt("%.1f", app.model.todayMinutes()));
+
+  // turned off, the plan ends the way it always did
+  app.toggleLoop();
+  t.check("app loop: turned off in the model and the session", !app.model.s.repeat && !app.session.loop());
+  adv(115 * MIN + 1000);
+  t.check("app loop: with it off the plan ends and fades out as before", app.session.done() && app.closing);
+
+  // a plan without rounds says why nothing changes, and a timer still ends
+  app.setLoop(false);
+  app.selectScene("sleep");
+  app.toast = Toast();
+  app.toggleLoop();
+  t.check("app loop: on a timer the toggle explains itself", app.model.s.repeat && app.toast.active() && app.toast.msg.find(L"timed rounds") != wstring::npos, narrow(app.toast.msg));
+  t.check("app loop: and the timer is not looped", !app.session.snapshot().loop && app.session.planId() == "t60");
+  adv(1000);
+  adv(61 * MIN);
+  t.check("app loop: so it still ends when the time is up", app.session.done() && app.closing);
+  app.toast = Toast();
+  app.toggleLoop();
+  t.check("app loop: turning it off there says so", !app.model.s.repeat && app.toast.active() && app.toast.msg == L"Loop is off");
+
+  // the saved setting comes back
+  app.setLoop(true);
+  const string saved = app.model.serialize();
+  Engine eng2;
+  eng2.start(false, 48000);
+  Stream st2;
+  st2.setDryRun(true);
+  st2.configure(L"mpv.exe", L"yt-dlp.exe");
+  App again(eng2, st2);
+  again.model.load(saved);
+  again.init();
+  t.check("app loop: a saved loop comes back with the app", again.model.s.repeat && again.session.loop());
+  Engine eng3;
+  eng3.start(false, 48000);
+  Stream st3;
+  st3.setDryRun(true);
+  st3.configure(L"mpv.exe", L"yt-dlp.exe");
+  App fresh(eng3, st3);
+  fresh.init();
+  t.check("app loop: a first start has it off", !fresh.model.s.repeat && !fresh.session.loop());
+
+  // launch options
+  Launch l = parseLaunch({L"--scene", L"focus", L"--plan", L"p25", L"--loop", L"--play"});
+  t.check("app loop: --loop is read", l.loop == 1 && l.scene == "focus" && l.plan == "p25" && l.play);
+  t.check("app loop: --no-loop is read", parseLaunch({L"--no-loop"}).loop == 0);
+  t.check("app loop: without either it is left alone", parseLaunch({L"--scene", L"read"}).loop == -1);
+  again.setLoop(false);
+  again.applyLaunch(l);
+  t.check("app loop: a launch with --loop turns it on and plays", again.model.s.repeat && again.session.loop() && again.running && again.session.planId() == "p25");
+  Launch off;
+  off.loop = 0;
+  again.applyLaunch(off);
+  t.check("app loop: --no-loop turns it off", !again.model.s.repeat && !again.session.loop());
+  Launch none;
+  again.setLoop(true);
+  again.applyLaunch(none);
+  t.check("app loop: a launch that says nothing about it keeps the setting", again.model.s.repeat);
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -991,10 +1203,10 @@ int runSelfTests(const string& only) {
   if (want("thread")) testThread(t);
   if (want("install")) testInstall(t);
   if (want("model")) testModel(t);
-  if (want("session")) testSession(t);
-  if (want("app")) testApp(t);
+  if (want("session")) { testSession(t); testSessionLoop(t); }
+  if (want("app")) { testApp(t); testAppLoop(t); }
   if (want("resolver")) testResolver(t);
-  if (want("ui")) testUi(t);
+  if (want("ui")) { testUi(t); testLoopUi(t); }
   if (want("launch")) testLaunch(t);
   if (want("mini")) testMini(t);
   if (want("sprint")) testSprint(t);

@@ -310,6 +310,14 @@ void Ui::paintStage() {
       g.text(pd ? pd->label : L"?", L.plan[i], T(12.5f, 500, sel || hv ? P.text : P.text2, TX_CENTER));
     }
   }
+  // the loop button beside the plans: lit when the rounds loop, dim when the plan has none to loop
+  if (L.loopBtn.w > 0 && visible(L.loopBtn.inset(-3))) {
+    const bool on = m.s.repeat, usable = planHasRounds(m.planId()), hv = hot(H_LOOP);
+    seg(L.loopBtn);
+    const R inner = L.loopBtn.inset(3);
+    if (on) segButton(inner, true, hv);
+    g.icon("i-repeat", inner.cx(), inner.cy(), 18, A(on ? P.accent : (hv ? P.text : P.text2), usable ? 1.f : .45f));
+  }
   paintRing();
   paintTransport();
   paintSpectrum();
@@ -388,6 +396,8 @@ void Ui::paintRing() {
       else if (i == s.round - 1 && !brk && !s.done) g.fillCircle(dx, dy, 3.5f, P.accent);
       else g.strokeCircle(dx, dy, 2.75f, P.line2, 1.5f);
     }
+    // looping: a small repeat mark after the dots, so the compact player shows it too
+    if (s.loop) g.icon("i-repeat", cx + total / 2 + 15, dy, 12, A(ink, .85f), false, 2.2f);
   }
 }
 
@@ -753,6 +763,14 @@ void Ui::paintOverlays() {
   }
 }
 
+const vector<KeyRow>& keyRows() {
+  static const vector<KeyRow> rows = {
+      {{L"Space"}, {"i-play"}}, {{L"←", L"→"}, {"i-prev", "i-next"}}, {{L"↑", L"↓"}, {"i-vol"}}, {{L"M"}, {"i-mute"}},
+      {{L"1", L"–", L"8"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"R"}, {"i-repeat"}}, {{L"V"}, {"i-video"}}, {{L"N"}, {"i-mini"}},
+      {{L"Ctrl", L"V"}, {"i-link"}}};
+  return rows;
+}
+
 void Ui::paintSheet() {
   const Palette& P = g.pal;
   g.fill({0, 0, W_, H_}, rgb(0x05060a, .6f));
@@ -807,12 +825,8 @@ void Ui::paintSheet() {
     }
     g.text(L"Hedges’ g, lab studies", {s.x + 20, iy + 4, 300, 17}, T(12, 400, P.text3));
   } else {
-    struct Row { std::vector<const wchar_t*> keys; std::vector<const char*> icons; };
-    const vector<Row> rows = {
-        {{L"Space"}, {"i-play"}}, {{L"←", L"→"}, {"i-prev", "i-next"}}, {{L"↑", L"↓"}, {"i-vol"}}, {{L"M"}, {"i-mute"}},
-        {{L"1", L"–", L"8"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"V"}, {"i-video"}}, {{L"N"}, {"i-mini"}}, {{L"Ctrl", L"V"}, {"i-link"}}};
     float y = s.y + 56 + 8;
-    for (const Row& r : rows) {
+    for (const KeyRow& r : keyRows()) {
       float x = s.x + 20;
       for (const wchar_t* k : r.keys) {
         if (k[0] == L'–') { g.text(k, {x, y, 14, 26}, T(12, 400, P.text2, TX_CENTER)); x += 14 + 4; continue; }

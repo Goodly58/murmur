@@ -9,6 +9,7 @@ struct TestLog {
 };
 
 void testUi(TestLog& t);
+void testLoopUi(TestLog& t);
 void testResolver(TestLog& t);
 void testLaunch(TestLog& t);
 void testMini(TestLog& t);

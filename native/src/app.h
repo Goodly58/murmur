@@ -23,6 +23,7 @@ struct Toast {
 struct Launch {
   string scene, plan;
   bool play = false, mini = false, full = false;
+  int loop = -1;  // --loop is 1, --no-loop is 0, neither is -1 (leave the saved setting alone)
   vector<wstring> files, links;
 };
 Launch parseLaunch(const vector<wstring>& args);
@@ -80,6 +81,10 @@ class App {
   // scenes and plans
   void selectScene(const string& id);
   void selectPlan(const string& id);
+  // Loop: a plan with rounds (25·5, 50·10, 15·3) starts over after its last round instead of ending. One setting for
+  // every scene; timers and the open-ended plan ignore it.
+  void setLoop(bool on);
+  void toggleLoop();
 
   // mix
   void setLevel(int ch, int v);

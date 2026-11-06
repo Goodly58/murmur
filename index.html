@@ -58,6 +58,7 @@
   <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></symbol>
   <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 4.5h10a1 1 0 0 1 1 1V20l-6-4.2L6 20V5.5a1 1 0 0 1 1-1Z"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4.5 11.5v-1a4 4 0 0 1 4-4H20M16.5 3.5 20 6.5l-3.5 3M19.5 12.5v1a4 4 0 0 1-4 4H4M7.5 14.5 4 17.5l3.5 3"/></symbol>
 </svg>
 
 <div class="app" id="app">
@@ -102,7 +103,12 @@
 
   <main class="stage" id="stage">
     <div class="stage-core">
-      <div class="seg" id="plans" role="radiogroup" aria-label="Plan"></div>
+      <div class="plan-row">
+        <div class="seg" id="plans" role="radiogroup" aria-label="Plan"></div>
+        <div class="seg icons" id="loopSeg" hidden>
+          <button type="button" id="loop" aria-pressed="false" title="Loop the rounds: start over after the last one (R)"><svg class="ic"><use href="#i-repeat"/></svg></button>
+        </div>
+      </div>
       <div class="ring" id="ring">
         <svg class="ring-svg" viewBox="0 0 320 320" aria-hidden="true">
           <circle class="ring-track" cx="160" cy="160" r="150"/>
@@ -258,6 +264,7 @@
     <dt><kbd>M</kbd></dt><dd><svg class="ic"><use href="#i-mute"/></svg></dd>
     <dt><kbd>1</kbd>&ndash;<kbd>8</kbd></dt><dd><svg class="ic"><use href="#i-target"/></svg></dd>
     <dt><kbd>B</kbd></dt><dd><svg class="ic"><use href="#i-phones"/></svg></dd>
+    <dt><kbd>R</kbd></dt><dd><svg class="ic"><use href="#i-repeat"/></svg></dd>
     <dt><kbd>V</kbd></dt><dd><svg class="ic"><use href="#i-video"/></svg></dd>
     <dt><kbd>Ctrl</kbd><kbd>V</kbd></dt><dd><svg class="ic"><use href="#i-link"/></svg></dd>
   </dl>

@@ -56,6 +56,7 @@ App::App(Engine& engine, Stream& st)
       }()) {}
 
 void App::init() {
+  session.setLoop(model.s.repeat);
   session.setPlan(model.planId());
   applyVolumes();
 }
@@ -187,6 +188,8 @@ Launch parseLaunch(const vector<wstring>& args) {
     if ((v = value(L"--scene")) != "\x01") { l.scene = v; continue; }
     if ((v = value(L"--plan")) != "\x01") { l.plan = v; continue; }
     if (a == L"--play") { l.play = true; continue; }
+    if (a == L"--loop") { l.loop = 1; continue; }
+    if (a == L"--no-loop") { l.loop = 0; continue; }
     if (a == L"--mini") { l.mini = true; continue; }
     if (a == L"--full") { l.full = true; continue; }
     if (a[0] == L'-') continue;
@@ -201,6 +204,7 @@ void App::applyLaunch(const Launch& l) {
     enterScene(l.scene, running ? 1.4 : 0.15, running || l.play);  // while playing, a new scene keeps playing
   }
   if (!l.plan.empty()) selectPlan(l.plan);
+  if (l.loop >= 0) setLoop(l.loop == 1);
   for (const wstring& link : l.links) pasteText(link);
   if (!l.files.empty()) addFiles(l.files);
   if (l.play && !running) startAll();
@@ -263,6 +267,19 @@ void App::selectPlan(const string& id) {
   if (running) { session.start(); applyAudio(1.2); }
   changed();
   save();
+}
+
+void App::setLoop(bool on) {
+  model.s.repeat = on;
+  session.setLoop(on);
+  changed();
+  save();
+}
+
+void App::toggleLoop() {
+  setLoop(!model.s.repeat);
+  // the setting is kept, but a plan without rounds has nothing to loop: say so instead of looking like nothing happened
+  if (!planHasRounds(model.planId())) showToast(model.s.repeat ? L"Loop is on for the timed rounds, like 25·5" : L"Loop is off");
 }
 
 // ---------------------------------------------------------------------------------------------------

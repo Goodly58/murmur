@@ -63,6 +63,13 @@ const PlanDef* findPlan(const string& id) {
   return nullptr;
 }
 
+bool planHasRounds(const string& id) {
+  const PlanDef* p = findPlan(id);
+  int focus = 0;
+  if (p) for (const PhaseDef& ph : p->phases) if (ph.kind == PH_FOCUS) focus++;
+  return focus > 1;
+}
+
 static Mix mk(std::initializer_list<std::pair<const char*, int>> l) {
   Mix m = emptyMix();
   for (auto& kv : l) m[(size_t)channelIndex(kv.first)] = kv.second;

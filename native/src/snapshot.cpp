@@ -28,7 +28,7 @@ HitKind kindByName(const string& n) {
       {"reset", H_RESET}, {"beatmode", H_BEATMODE}, {"mute", H_MUTE}, {"master", H_MASTER}, {"blend", H_BLEND}, {"info", H_INFO},
       {"keys", H_KEYS}, {"chip", H_CHIP}, {"chipx", H_CHIPX}, {"padd", H_PADD}, {"pupd", H_PUPD}, {"tab", H_TAB}, {"link", H_LINK},
       {"video", H_VIDEO}, {"watch", H_WATCH}, {"player", H_PLAYER}, {"vprev", H_VPREV}, {"vnext", H_VNEXT}, {"vclear", H_VCLEAR},
-      {"filepick", H_FILEPICK}, {"toastact", H_TOASTACT}, {"mini", H_MINI}, {"setup", H_SETUP}};
+      {"filepick", H_FILEPICK}, {"toastact", H_TOASTACT}, {"mini", H_MINI}, {"setup", H_SETUP}, {"loop", H_LOOP}};
   auto it = m.find(n);
   return it == m.end() ? H_NONE : it->second;
 }
@@ -83,6 +83,7 @@ void act(Rig& r, const string& a) {
   else if (c == "pause") app.stopAll();
   else if (c == "advance") r.advance((int64_t)(std::stod(p[1]) * 1000));
   else if (c == "plan") app.selectPlan(p[1]);
+  else if (c == "loop") app.setLoop(p.size() < 2 || p[1] != "off");  // loop, loop:on or loop:off
   else if (c == "beats") app.setBeatsMode(std::stoi(p[1]));
   else if (c == "band") app.setBand(std::stoi(p[1]));
   else if (c == "tile") app.setLevel(std::stoi(p[1]), std::stoi(p[2]));
@@ -164,7 +165,7 @@ int runSnapshot(int argc, wchar_t** argv) {
     if (wstring(argv[i]) != L"--hits") continue;
     static const char* names[] = {"none", "scene", "plan", "prev", "play", "next", "tile", "band", "reset", "beatmode", "mute", "master", "blend",
                                   "info", "keys", "chip", "chipx", "padd", "pupd", "tab", "link", "video", "watch", "player", "vprev", "vnext", "vclear",
-                                  "filepick", "fprev", "fnext", "fclear", "linkgo", "sheetclose", "sheetback", "evlink", "toastact", "pbar", "side", "mini", "setup"};
+                                  "filepick", "fprev", "fnext", "fclear", "linkgo", "sheetclose", "sheetback", "evlink", "toastact", "pbar", "side", "mini", "setup", "loop"};
     for (const Hit& h : r.ui->hits()) std::printf("%s %d %.0f %.0f\n", names[h.k], h.i, h.r.cx(), h.r.cy());
   }
 

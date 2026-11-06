@@ -34,6 +34,19 @@ bool closeTo(Pix a, Pix b, int tol) {
 
 string pixStr(Pix p) { return std::to_string(p.r) + "," + std::to_string(p.g) + "," + std::to_string(p.b); }
 
+string fmt(const char* f, ...) {
+  char b[512];
+  va_list ap;
+  va_start(ap, f);
+  vsnprintf(b, sizeof b, f, ap);
+  va_end(ap);
+  return b;
+}
+
+// A thin stroke is rarely drawn at full strength, so colours of marks are told apart by hue rather than by exact value.
+bool orangeish(Pix p) { return p.r - p.b > 40 && p.r >= p.g; }
+bool tealish(Pix p) { return p.g - p.r > 25 && p.b - p.r > 15; }
+
 int sceneIdx(const string& id) {
   const auto& s = stockScenes();
   for (size_t i = 0; i < s.size(); i++) if (s[i].id == id) return (int)i;
@@ -419,6 +432,179 @@ void testUi(TestLog& t) {
       ui.setTheme(true);
     }
   }
+}
+
+// The loop button beside the plans, the R key, the mark in the ring (also in the compact player) and the Keys sheet.
+void testLoopUi(TestLog& t) {
+  CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  Rig r;
+  if (!r.init()) { t.check("loop ui: the rig starts", false); return; }
+  Ui& ui = *r.ui;
+  App& app = *r.app;
+  auto tipOf = [&] { return narrow(ui.find(H_LOOP).tip); };
+  // how orange the brightest pixel in a box is (red minus blue): the accent is strongly orange, the greys are not
+  auto orange = [&](const vector<uint8_t>& px, UINT pw, const R& box) {
+    int best = -255;
+    for (int y = (int)box.y; y < (int)box.b(); y++)
+      for (int x = (int)box.x; x < (int)box.r(); x++) { const Pix p = at(px, pw, x, y); best = std::max(best, p.r - p.b); }
+    return best;
+  };
+
+  app.selectScene("focus");
+  app.stopAll();
+  ui.setSize(1180, 760);
+  ui.changed();
+  const Hit lp = ui.find(H_LOOP), first = ui.find(H_PLAN, 0), last = ui.find(H_PLAN, 2);
+  t.check("loop ui: Focus has the loop button right after its three plans", lp.k == H_LOOP && last.k == H_PLAN && lp.r.x > last.r.r() && lp.r.x - last.r.r() < 16 && std::fabs(lp.r.cy() - last.r.cy()) < 2,
+          std::to_string(lp.r.x) + " after " + std::to_string(last.r.r()));
+  const float mid = ui.ringRect().cx();
+  t.check("loop ui: the plans and the button are centred as one group", std::fabs(((first.r.x - 3) + lp.r.r()) / 2 - mid) < 1.5f,
+          std::to_string(((first.r.x - 3) + lp.r.r()) / 2) + " vs " + std::to_string(mid));
+  t.check("loop ui: its tip says what it does", tipOf().find("Loop the rounds") != string::npos && tipOf().find("(R)") != string::npos, tipOf());
+
+  // only scenes with a plan that has rounds get one
+  for (const char* id : {"sprint", "read", "create", "mask"}) {
+    app.selectScene(id);
+    app.stopAll();
+    ui.changed();
+    t.check(string("loop ui: ") + id + " has the button", ui.find(H_LOOP).k == H_LOOP);
+  }
+  for (const char* id : {"calm", "sleep"}) {
+    app.selectScene(id);
+    app.stopAll();
+    ui.changed();
+    t.check(string("loop ui: ") + id + " has none, its plans are timers", ui.find(H_LOOP).k == H_NONE);
+  }
+  app.selectScene("focus");
+  app.stopAll();
+  ui.changed();
+
+  // pointer and key
+  r.click(H_LOOP);
+  t.check("loop ui: a click turns the loop on", app.model.s.repeat && app.session.loop());
+  t.check("loop ui: and the tip changes to match", tipOf().find("Looping") != string::npos && tipOf().find("stop after the last round") != string::npos, tipOf());
+  ui.key('R', false, false);
+  t.check("loop ui: the R key turns it off", !app.model.s.repeat && tipOf().find("Loop the rounds") != string::npos);
+  ui.key('R', false, false);
+  t.check("loop ui: and on again", app.model.s.repeat);
+  app.selectPlan("free");
+  ui.changed();
+  t.check("loop ui: on the open-ended plan the tip explains why it does nothing", tipOf().find("needs timed rounds") != string::npos, tipOf());
+  app.selectPlan("p25");
+  app.setLoop(false);
+  ui.changed();
+
+  // the button in colour: grey when off, accent when on, faded accent when the plan has no rounds
+  for (const bool dark : {true, false}) {
+    ui.setTheme(dark);
+    const string theme = dark ? "dark" : "light";
+    const Hit b = ui.find(H_LOOP);
+    const R icon = {b.r.cx() - 9, b.r.cy() - 9, 18, 18};
+    vector<uint8_t> px;
+    UINT pw = 0, ph = 0;
+    app.selectPlan("p25");
+    app.setLoop(false);
+    render(r, 1, px, pw, ph);
+    const int off = orange(px, pw, icon);
+    app.setLoop(true);
+    render(r, 1, px, pw, ph);
+    const int on = orange(px, pw, icon);
+    app.selectPlan("free");
+    render(r, 1, px, pw, ph);
+    const int dim = orange(px, pw, icon);
+    t.check("loop ui (" + theme + "): off, the icon is grey", off < 20, std::to_string(off));
+    t.check("loop ui (" + theme + "): on, it is the accent colour", on > 120, std::to_string(on));
+    t.check("loop ui (" + theme + "): on a plan with no rounds it is a faded accent", dim > 30 && dim < on - 20, std::to_string(dim));
+    app.selectPlan("p25");
+  }
+  ui.setTheme(true);
+
+  // the mark in the ring: found by drawing the ring with the loop off and on and looking at what changed
+  auto ringDiff = [&](int* n, R* box, Pix* strongest) {
+    const bool was = app.model.s.repeat;
+    vector<uint8_t> a, b;
+    UINT pw = 0, ph = 0;
+    app.setLoop(false);
+    render(r, 1, a, pw, ph);
+    app.setLoop(true);
+    render(r, 1, b, pw, ph);
+    app.setLoop(was);
+    const R rr = ui.ringRect();
+    int x0 = 1 << 20, y0 = 1 << 20, x1 = -1, y1 = -1, cnt = 0, bestD = 0;
+    for (int y = (int)rr.y; y < (int)rr.b(); y++)
+      for (int x = (int)rr.x; x < (int)rr.r(); x++) {
+        const Pix p = at(a, pw, x, y), q = at(b, pw, x, y);
+        const int d = std::abs(p.r - q.r) + std::abs(p.g - q.g) + std::abs(p.b - q.b);
+        if (d <= 9) continue;
+        cnt++;
+        x0 = std::min(x0, x); y0 = std::min(y0, y); x1 = std::max(x1, x); y1 = std::max(y1, y);
+        if (d > bestD) { bestD = d; *strongest = q; }
+      }
+    *n = cnt;
+    *box = {(float)x0, (float)y0, (float)(x1 - x0 + 1), (float)(y1 - y0 + 1)};
+  };
+  {
+    app.selectScene("focus");
+    app.stopAll();
+    app.selectPlan("p25");
+    ui.changed();
+    int n = 0;
+    R box;
+    Pix strong{0, 0, 0};
+    ringDiff(&n, &box, &strong);
+    t.check("loop ui: a small repeat mark appears in the ring when the loop is on", n > 15 && box.w <= 20 && box.h <= 20, fmt("%d pixels, %.0fx%.0f", n, box.w, box.h));
+    t.check("loop ui: it sits right of the dots, below the middle", box.x > ui.ringRect().cx() && box.y > ui.ringRect().cy(),
+            fmt("at %.0f,%.0f in a ring centred at %.0f,%.0f", box.x, box.y, ui.ringRect().cx(), ui.ringRect().cy()));
+    t.check("loop ui: during a round it is the accent colour", orangeish(strong) && !tealish(strong), pixStr(strong));
+    app.startAll();
+    r.advance(25 * 60000 + 1000);
+    ui.changed();
+    ringDiff(&n, &box, &strong);
+    t.check("loop ui: during a break it turns the break colour", n > 15 && tealish(strong) && !orangeish(strong), pixStr(strong));
+    app.stopAll();
+    app.selectPlan("free");
+    ui.changed();
+    ringDiff(&n, &box, &strong);
+    t.check("loop ui: with no rounds there is no mark", n == 0, std::to_string(n));
+  }
+
+  // the compact player has no button but shows the mark
+  {
+    app.selectScene("focus");
+    app.stopAll();
+    app.selectPlan("p25");
+    ui.setMini(true);
+    ui.setSize(320, 484);
+    ui.changed();
+    int n = 0;
+    R box;
+    Pix strong{0, 0, 0};
+    ringDiff(&n, &box, &strong);
+    t.check("loop ui: the compact player has no button", ui.find(H_LOOP).k == H_NONE);
+    t.check("loop ui: but it shows the mark", n > 15 && box.w <= 20 && box.h <= 20, fmt("%d pixels, %.0fx%.0f", n, box.w, box.h));
+    ui.setMini(false);
+    ui.setSize(1180, 760);
+  }
+
+  // in the narrowest window the button is still inside the stage
+  ui.setSize(940, 640);
+  ui.changed();
+  {
+    const Hit b = ui.find(H_LOOP), f = ui.find(H_PLAN, 0);
+    t.check("loop ui: at the smallest window size the group fits in the stage", b.k == H_LOOP && f.r.x - 3 >= 232 && b.r.r() <= 940 - 396, fmt("%.0f to %.0f of 232 to 544", f.r.x - 3, b.r.r()));
+  }
+  ui.setSize(1180, 760);
+
+  // the Keys sheet has a row for it, and room for every row
+  bool hasR = false;
+  for (const KeyRow& row : keyRows()) {
+    bool key = false, icon = false;
+    for (const wchar_t* k : row.keys) key = key || wcscmp(k, L"R") == 0;
+    for (const char* ic : row.icons) icon = icon || std::strcmp(ic, "i-repeat") == 0;
+    hasR = hasR || (key && icon);
+  }
+  t.check("loop ui: the Keys sheet lists R with the repeat icon", hasR && (int)keyRows().size() == KEYS_ROWS, std::to_string(keyRows().size()));
+  t.check("loop ui: and the sheet is tall enough for its last row", 64 + (KEYS_ROWS - 1) * 38 + 26 <= SHEET_KEYS_H, std::to_string(SHEET_KEYS_H));
 }
 
 void testResolver(TestLog& t) {

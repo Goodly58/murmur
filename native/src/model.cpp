@@ -199,6 +199,7 @@ bool Model::parse(const string& text, State& out) {
   }
   if (const Json* v = j.get("master")) d.master = clampi((int)std::lround(v->numOr(70)), 0, 100);
   if (const Json* v = j.get("blend")) d.blend = clampi((int)std::lround(v->numOr(50)), 0, 100);
+  if (const Json* v = j.get("repeat")) d.repeat = v->boolOr(false);
   if (const Json* v = j.get("streamOn")) d.streamOn = v->boolOr(true);
   if (const Json* v = j.get("custom")) if (v->isStr() && validSpec(v->s) && v->s.compare(0, 5, "file:") != 0) d.custom = v->s;
   if (const Json* v = j.get("tab")) d.tab = v->strOr("stream") == "files" ? "files" : "stream";
@@ -266,6 +267,7 @@ string Model::serialize() const {
   j.set("beatsMode", Json::str(modeName(s.beatsMode)));
   j.set("master", Json::num(s.master));
   j.set("blend", Json::num(s.blend));
+  j.set("repeat", Json::boolean(s.repeat));
   j.set("streamOn", Json::boolean(s.streamOn));
   j.set("custom", Json::str(s.custom));
   j.set("tab", Json::str(s.tab));

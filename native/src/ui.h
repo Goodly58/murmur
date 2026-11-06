@@ -4,7 +4,8 @@
 #include "app.h"
 #include "gfx.h"
 
-constexpr float SHEET_EVIDENCE_H = 546, SHEET_KEYS_H = 410;  // modal sheet heights (DIPs)
+constexpr int KEYS_ROWS = 10;  // rows on the Keys sheet
+constexpr float SHEET_EVIDENCE_H = 546, SHEET_KEYS_H = 64 + KEYS_ROWS * 38 + 4;  // modal sheet heights (DIPs)
 
 // Live spectrum of the mix on a log-frequency axis. Cheap on purpose: 15 fps, only repainted when the
 // shape has moved enough to see, and it goes back to sleep once the shape settles.
@@ -25,7 +26,8 @@ struct Spectrum {
 enum HitKind {
   H_NONE = 0, H_SCENE, H_PLAN, H_PREV, H_PLAY, H_NEXT, H_TILE, H_BAND, H_RESET, H_BEATMODE, H_MUTE, H_MASTER, H_BLEND,
   H_INFO, H_KEYS, H_CHIP, H_CHIPX, H_PADD, H_PUPD, H_TAB, H_LINK, H_VIDEO, H_WATCH, H_PLAYER, H_VPREV, H_VNEXT, H_VCLEAR,
-  H_FILEPICK, H_FPREV, H_FNEXT, H_FCLEAR, H_LINKGO, H_SHEETCLOSE, H_SHEETBACK, H_EVLINK, H_TOASTACT, H_PBAR, H_SIDE, H_MINI, H_SETUP
+  H_FILEPICK, H_FPREV, H_FNEXT, H_FCLEAR, H_LINKGO, H_SHEETCLOSE, H_SHEETBACK, H_EVLINK, H_TOASTACT, H_PBAR, H_SIDE, H_MINI, H_SETUP,
+  H_LOOP
 };
 
 struct Hit {
@@ -43,6 +45,13 @@ struct BalanceWords {
   int side = 0;               // -1 leaning to the stream (or your music), 0 in the middle, 1 leaning to the sounds
 };
 BalanceWords balanceWords(int blend, bool streamTab);
+
+// A row of the Keys sheet: the keys to press and the icons for what they do.
+struct KeyRow {
+  vector<const wchar_t*> keys;
+  vector<const char*> icons;
+};
+const vector<KeyRow>& keyRows();
 
 struct UiHooks {
   std::function<void()> invalidateAll;
@@ -127,7 +136,7 @@ class Ui {
     vector<R> chip;
     vector<float> chipText;   // width available for each chip's name
     R scene[NSCENES];
-    R planSeg;
+    R planSeg, loopBtn;  // loopBtn: empty when none of the scene's plans has rounds to loop
     vector<R> plan;
     vector<string> planIds;
     R prev, play, next;

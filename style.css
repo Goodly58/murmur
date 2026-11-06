@@ -49,6 +49,9 @@ input { font: inherit; color: inherit; }
 .seg.icons button { width: 32px; padding: 0; display: grid; place-items: center; }
 .seg.icons .ic { width: 18px; height: 18px; }
 .seg.icons button[aria-checked=true], .seg.icons button[aria-selected=true] { color: var(--accent); }
+.plan-row { display: flex; align-items: center; gap: 8px; }
+#loop[aria-pressed=true] { color: var(--accent); }
+#loopSeg[data-idle=true] { opacity: .5; }
 
 input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; min-width: 0; height: 20px; margin: 0; background: transparent; cursor: pointer; --p: 50%; }
 input[type=range]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: linear-gradient(to right, var(--accent) var(--p), var(--line-2) var(--p)); }
@@ -145,10 +148,13 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .done-ic { display: none; width: 44px; height: 44px; color: var(--ok); stroke-width: 1.4; }
 .ring[data-kind=done] .done-ic { display: block; }
 .ring[data-kind=done] .time { display: none; }
-.dots { display: flex; gap: 7px; height: 8px; }
+.dots { position: relative; display: flex; gap: 7px; height: 8px; }
 .dots i { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--line-2); }
 .dots i.done { background: var(--text-3); border-color: var(--text-3); }
 .dots i.cur { background: var(--accent); border-color: var(--accent); }
+/* looping: a small repeat mark after the dots, outside the row so the dots stay centred */
+.dots .loop-mark { position: absolute; left: calc(100% + 8px); top: -2px; width: 12px; height: 12px; stroke-width: 2.2; color: var(--accent); }
+.ring[data-kind=break] .dots .loop-mark { color: var(--calm); }
 
 .transport { display: flex; align-items: center; gap: 20px; }
 .round { position: relative; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--line-2); background: var(--panel); color: var(--text-2); }
