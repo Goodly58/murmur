@@ -41,9 +41,9 @@ try:
         check("pink 14, brown 8, beats 24", levels.get("pink") == "14" and levels.get("brown") == "8" and levels.get("beats") == "24", str(levels))
         check("the ring is labelled Sprint", page.inner_text("#phase").strip().lower() == "sprint")
         videos = page.evaluate("async () => (await import('./data.js')).SCENES.find(s => s.id === 'sprint').videos")
-        check("seven streams, the vocal house first and the deep house radio second", len(videos) == 7 and videos[:2] == ["8BzYJsT1FhA", "Ihm9OQWmibA"], str(videos))
+        check("six streams, the house study radio first, the vocal deep house gone", len(videos) == 6 and videos[:2] == ["Ihm9OQWmibA", "UYOb37KRFqk"] and "8BzYJsT1FhA" not in videos, str(videos))
         poster = page.get_attribute("#posterImg", "src") or ""
-        check("the player starts on the vocal house", "/8BzYJsT1FhA/" in poster, poster)
+        check("the player starts on the house study radio", "/Ihm9OQWmibA/" in poster, poster)
         page.click('#scenes .scene[data-scene="focus"]')
         page.wait_for_timeout(300)
         page.keyboard.press("2")

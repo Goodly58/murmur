@@ -1,10 +1,10 @@
 // The version being built. The Makefile passes the three numbers (mingw32-make APP_VERSION=1.2.3, which the
-// release workflow does for a tag like v1.2.3); a plain build is 1.0.0. The resource file reads this header too.
+// release workflow does for a tag like v1.2.3); a plain build is 1.1.0 (the workflow checks for the same number, so change both). The resource file reads this header too.
 #pragma once
 
 #ifndef MURMUR_VER_MAJOR
 #define MURMUR_VER_MAJOR 1
-#define MURMUR_VER_MINOR 0
+#define MURMUR_VER_MINOR 1
 #define MURMUR_VER_PATCH 0
 #endif
 

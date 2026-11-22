@@ -16,16 +16,23 @@ void Session::reset() {
   running_ = done_ = false;
 }
 
+bool Session::resumeAt(int index, int64_t ms, int laps) {
+  const int n = (int)plan_->phases.size();
+  if (n == 0 || index < 0 || ms < 0 || laps < 0) return false;
+  if (index > n || (index == n && !repeats())) return false;  // the closing break exists only while the rounds loop
+  reset();
+  i_ = index;
+  laps_ = repeats() ? laps : 0;
+  base_ = std::min(ms, std::max<int64_t>(0, phase().ms - 1000));  // never on the very edge: a second is left to play
+  return true;
+}
+
 bool Session::repeats() const { return loop_ && planHasRounds(planId_); }
 
-int64_t Session::lapMs() const {
-  int64_t ms = 0;
-  for (const PhaseDef& ph : plan_->phases) ms += ph.ms;
-  for (const PhaseDef& ph : plan_->phases) {
-    if (ph.kind == PH_BREAK) { ms += ph.ms; break; }  // the closing break is as long as the plan's first
-  }
-  return ms;
-}
+// With a count, the set that uses it up is the last: no closing break after it, the plan ends there.
+bool Session::more() const { return repeats() && (sets_ == SETS_FOREVER || laps_ + 1 < sets_); }
+
+int64_t Session::lapMs() const { return planSetMs(planId_) + planBreakMs(planId_); }  // the closing break is as long as the plan's first
 
 PhaseDef Session::phase() const {
   if (plan_->phases.empty()) return {PH_FREE, INF_MS};
@@ -66,7 +73,7 @@ void Session::skip() {
 }
 
 // Moves to the next phase, carrying `carry` ms of overflow into it. After the last round a looping plan goes on
-// to one more break and then to the first round again; otherwise the plan ends.
+// to one more break and then to the first round again, until its sets are used up; otherwise the plan ends.
 void Session::advance(int64_t carry) {
   const PhaseKind prev = phase().kind;
   const int last = (int)plan_->phases.size() - 1;
@@ -74,10 +81,10 @@ void Session::advance(int64_t carry) {
   if (i_ < last) {
     i_ += 1;
   } else if (i_ == last) {
-    if (repeats()) i_ = last + 1;
+    if (more()) i_ = last + 1;
     else ended = true;
-  } else {  // the break that closed a lap
-    if (repeats()) { i_ = 0; laps_ += 1; }
+  } else {  // the break that closed a set
+    if (more()) { i_ = 0; laps_ += 1; }
     else ended = true;
   }
   if (ended) {
@@ -98,12 +105,18 @@ void Session::tick() {
   last_ = now;
   const PhaseKind kind = phase().kind;
   if (running_ && (kind == PH_FOCUS || kind == PH_FREE) && h_.onFocus) h_.onFocus(dt);
-  if (running_ && repeats()) {
-    // a long gap (the PC slept): skip the whole laps at once, rather than replaying every phase of them with its chime
+  if (running_ && more()) {
+    // a long gap (the PC slept): skip the whole laps at once, rather than replaying every phase of them with its chime.
+    // With a count the skipping stops at the last set, which plays out phase by phase so the plan ends where it should
+    // (and the break that closes a set does not exist in the last one, so a lap skipped from there must stay before it).
     const int64_t over = elapsed(now) - phase().ms, lap = lapMs();
     if (lap > 0 && over >= lap) {
-      base_ -= over / lap * lap;
-      laps_ += (int)(over / lap);
+      int64_t k = over / lap;
+      if (sets_ != SETS_FOREVER) k = std::min<int64_t>(k, sets_ - 1 - laps_ - (i_ >= (int)plan_->phases.size() ? 1 : 0));
+      if (k > 0) {
+        base_ -= k * lap;
+        laps_ += (int)k;
+      }
     }
   }
   int guard = 0;
@@ -141,6 +154,7 @@ SessionSnap Session::snapshot() const {
   s.cycle = focusBlocks > 1;
   s.lap = laps_;
   s.loop = repeats();
+  s.sets = s.loop && sets_ != SETS_FOREVER ? std::max(sets_, laps_ + 1) : 0;
   if (plan_->fadeMs && ph.kind == PH_TIMER && s.remaining < plan_->fadeMs) s.fade = (double)s.remaining / (double)plan_->fadeMs;
   return s;
 }

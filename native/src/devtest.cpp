@@ -152,6 +152,73 @@ int runSessionPeaks(int seconds) {
   return 0;
 }
 
+// `Murmur.exe --session-mute <part of a program's name> <1|0>`: mutes or unmutes that program in the Windows volume
+// mixer (every session of every process whose image name contains the text). For live tests against another player:
+// it can be driven for real while nobody has to listen to it. Prints what it touched.
+int runSessionMute(const wstring& namePart, bool mute) {
+  CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+  IMMDeviceEnumerator* en = nullptr;
+  IMMDeviceCollection* devs = nullptr;
+  if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL, __uuidof(IMMDeviceEnumerator), (void**)&en)) ||
+      FAILED(en->EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE, &devs))) {
+    std::printf("cannot list the audio outputs\n");
+    return 1;
+  }
+  wstring want = namePart;
+  for (auto& c : want) c = (wchar_t)std::towlower(c);
+  UINT nd = 0;
+  devs->GetCount(&nd);
+  int touched = 0;
+  for (UINT d = 0; d < nd; d++) {
+    IMMDevice* dev = nullptr;
+    IAudioSessionManager2* mgr = nullptr;
+    IAudioSessionEnumerator* list = nullptr;
+    if (FAILED(devs->Item(d, &dev))) continue;
+    if (SUCCEEDED(dev->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr, (void**)&mgr)) && SUCCEEDED(mgr->GetSessionEnumerator(&list))) {
+      int n = 0;
+      list->GetCount(&n);
+      for (int i = 0; i < n; i++) {
+        IAudioSessionControl* ctl = nullptr;
+        if (FAILED(list->GetSession(i, &ctl))) continue;
+        IAudioSessionControl2* c2 = nullptr;
+        ISimpleAudioVolume* vol = nullptr;
+        if (SUCCEEDED(ctl->QueryInterface(__uuidof(IAudioSessionControl2), (void**)&c2)) && SUCCEEDED(ctl->QueryInterface(__uuidof(ISimpleAudioVolume), (void**)&vol))) {
+          DWORD pid = 0;
+          c2->GetProcessId(&pid);
+          wchar_t full[MAX_PATH] = L"";
+          if (HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
+            DWORD len = MAX_PATH;
+            QueryFullProcessImageNameW(p, 0, full, &len);
+            CloseHandle(p);
+          }
+          wstring name = full;
+          const size_t cut = name.find_last_of(L'\\');
+          if (cut != wstring::npos) name = name.substr(cut + 1);
+          wstring low = name;
+          for (auto& c : low) c = (wchar_t)std::towlower(c);
+          if (!want.empty() && low.find(want) != wstring::npos) {
+            BOOL was = FALSE;
+            vol->GetMute(&was);
+            vol->SetMute(mute ? TRUE : FALSE, nullptr);
+            std::printf("  pid %5lu  %-24ls %s (was %s)\n", (unsigned long)pid, name.c_str(), mute ? "muted" : "unmuted", was ? "muted" : "unmuted");
+            touched++;
+          }
+        }
+        if (vol) vol->Release();
+        if (c2) c2->Release();
+        ctl->Release();
+      }
+    }
+    if (list) list->Release();
+    if (mgr) mgr->Release();
+    dev->Release();
+  }
+  devs->Release();
+  en->Release();
+  if (!touched) std::printf("  no session of a program named like that\n");
+  return touched ? 0 : 1;
+}
+
 // `Murmur.exe --loopback [seconds]`: prints the level of whatever is playing on the default output, once a second.
 // Handy for checking that the real window really makes sound.
 int runLoopback(int seconds) {

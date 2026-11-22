@@ -41,6 +41,14 @@ struct PlanDef {
 };
 const PlanDef* findPlan(const string& id);
 bool planHasRounds(const string& id);  // more than one focus block (25·5 and the like): the plans that can loop
+// How long a plan takes from its first round to its last, and the break that closes a set when it loops (as long as the
+// plan's own). `sets` runs one after another take sets * planSetMs + (sets - 1) * planBreakMs: no break after the last.
+int64_t planSetMs(const string& id);
+int64_t planBreakMs(const string& id);
+int64_t planLoopMs(const string& id, int sets);
+
+// A looping plan runs until it is stopped (0) or this many times, from 2 up to SETS_MAX; the picker offers 1 (no loop) to 6.
+constexpr int SETS_FOREVER = 0, SETS_MAX = 99;
 
 struct BeatDef {
   int band = 2;  // index into BANDS

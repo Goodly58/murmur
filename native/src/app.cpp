@@ -34,19 +34,27 @@ wstring cleanTitle(const wstring& in) {
   return o2;
 }
 
-App::App(Engine& engine, Stream& st)
-    : eng(engine), stream(st), session([this] {
+App::App(Engine& engine, Stream& st, Spotify& sp)
+    : eng(engine), stream(st), spotify(sp), session([this] {
         Session::Hooks h;
         h.onTick = [this](const SessionSnap& s) {
           applyFade(s.fade);
           if (onTick) onTick(); else changed();
         };
         h.onPhase = [this](const SessionSnap& s, PhaseKind) {
+          if (s.index == 0) runStarted();  // a looping plan came back to its first round
           eng.chime(s.kind == PH_BREAK ? 1 : 0);
           applyAudio(2.5);
           changed();
+          save();  // so a restart finds the round it was in
+          if (onPhase) onPhase(s.kind == PH_BREAK, false);
         };
-        h.onDone = [this](const SessionSnap&) { eng.chime(2); finish(); };
+        h.onDone = [this](const SessionSnap&) {
+          eng.chime(2);
+          finish();
+          syncPlugins();  // plugins hear that the plan is over now, not once it has faded out
+          if (onPhase) onPhase(false, true);
+        };
         h.onFocus = [this](int64_t ms) {
           if (!model.scene().study) return;  // Calm and Sleep are not study time
           model.addFocus(ms);
@@ -57,8 +65,41 @@ App::App(Engine& engine, Stream& st)
 
 void App::init() {
   session.setLoop(model.s.repeat);
+  session.setSets(model.s.sets);
   session.setPlan(model.planId());
   applyVolumes();
+  pickedUp = pickUpRun();
+  if (!pickedUp) model.clearFinishedTask();  // what was finished last time is done with; what was not is still there
+  plugins.rescan(model.s.plugins);
+  syncPlugins();
+}
+
+// A plan that was stopped part-way a little while ago (the window was closed, the PC restarted, Murmur was updated) opens
+// where it was, paused: the same round, the same minutes left. Older than half an hour and it starts from the top.
+bool App::pickUpRun() {
+  const RunMark m = model.s.run;
+  model.s.run = RunMark();
+  if (!m.valid() || m.scene != model.s.scene || m.plan != model.planId()) return false;
+  const int64_t age = (int64_t)model.nowFn() * 1000 - m.at;
+  if (age < 0 || age > RUN_MARK_FRESH_MS) return false;
+  if (!session.resumeAt(m.index, m.ms, m.lap)) return false;
+  showToast(L"Picked up where you left off", L"", nullptr, 5000);
+  return true;
+}
+
+void App::noteRun() {
+  const SessionSnap s = session.snapshot();
+  RunMark m;
+  // worth keeping once the plan is under way: past its first round, or half a minute into it
+  if (!s.done && s.duration < INF_MS && (s.index > 0 || s.lap > 0 || s.elapsed >= 30000)) {
+    m.scene = model.s.scene;
+    m.plan = s.planId;
+    m.index = s.index;
+    m.lap = s.lap;
+    m.ms = s.elapsed;
+    m.at = (int64_t)model.nowFn() * 1000;
+  }
+  model.s.run = m;
 }
 
 App::Effective App::effective() const {
@@ -86,8 +127,19 @@ void App::applyAudio(double ramp) {
 }
 
 void App::applyStreamVolume() {
+  if (spotifyOn) {
+    spotify.setVolume(spotifyVolume());
+    return;
+  }
   const Volumes v = volumes();
   stream.setVolume((int)std::lround(100 * std::pow(v.m, 1.5) * v.media * lastFade));
+}
+
+// The playlist's level on Spotify's own 0 to 100 scale: the same sum as the stream's, so the balance slider and the fades
+// treat both alike.
+int App::spotifyVolume() const {
+  const Volumes v = volumes();
+  return clampi((int)std::lround(100 * std::pow(v.m, 1.5) * v.media * lastFade), 0, 100);
 }
 
 void App::applyVolumes() {
@@ -110,16 +162,16 @@ void App::applyFade(double f) {
 // ---------------------------------------------------------------------------------------------------
 
 void App::startAll(double ramp) {
+  const bool fresh = !running || closing;  // starting while a finished plan fades out is a start again, not a resume
   closing = false;
   lastFade = 1;
   eng.setFade(1);
-  const bool fresh = !running;
   running = true;
   session.start();
   applyVolumes();
   applyAudio(ramp);
   eng.play();
-  if (fresh && pausedAt_ && wallMs() - pausedAt_ > 60000 && model.s.tab == "stream" && loadedSpec.compare(0, 5, "file:") != 0) {
+  if (fresh && pausedAt_ && wallMs() - pausedAt_ > 60000 && model.s.tab == "stream" && loadedSpec.compare(0, 5, "file:") != 0 && !isSpotifySpec(loadedSpec)) {
     loadedSpec.clear();  // a live stream left paused for a while is far behind: reload to catch up
     streamState = SS_IDLE;
   }
@@ -135,6 +187,7 @@ void App::startAll(double ramp) {
   if (onWake) onWake();
   const SessionSnap snap = session.snapshot();
   if (fresh && snap.cycle && snap.kind == PH_FOCUS && snap.elapsed < 1500) eng.chime(0);
+  if (fresh && snap.index == 0 && snap.elapsed < 1500) runStarted();
   changed();
 }
 
@@ -142,18 +195,25 @@ void App::stopAll() {
   running = false;
   session.pause();
   eng.pause();
-  stream.setPaused(true);
+  pauseMedia();
   pausedAt_ = wallMs();
   changed();
 }
 
+void App::pauseMedia() {
+  if (spotifyOn) spotify.setPaused(true);
+  stream.setPaused(true);
+}
+
 void App::togglePlay() {
-  if (running) stopAll(); else startAll();
+  // once the plan is over, play starts it again (also while it still fades out): there is nothing left to pause
+  if (running && !session.done()) stopAll(); else startAll();
 }
 
 void App::prevPhase() {
   session.restartPhase();
   if (!running) startAll();
+  syncPlugins();  // the round's clock went back to its start: a plugin that counts it down hears the new time
 }
 
 void App::nextPhase() {
@@ -189,12 +249,18 @@ Launch parseLaunch(const vector<wstring>& args) {
     if ((v = value(L"--plan")) != "\x01") { l.plan = v; continue; }
     if (a == L"--play") { l.play = true; continue; }
     if (a == L"--loop") { l.loop = 1; continue; }
+    if (a.size() > 7 && a.compare(0, 7, L"--loop=") == 0) {  // --loop=4 is four sets; --loop=1 is no loop; anything else goes on until stopped
+      const int n = _wtoi(a.c_str() + 7);
+      l.loop = n == 1 ? 0 : 1;
+      l.sets = n >= 2 ? std::min(n, SETS_MAX) : SETS_FOREVER;
+      continue;
+    }
     if (a == L"--no-loop") { l.loop = 0; continue; }
     if (a == L"--mini") { l.mini = true; continue; }
     if (a == L"--full") { l.full = true; continue; }
     if (a[0] == L'-') continue;
     if (isAudioFile(a)) l.files.push_back(a);
-    else if (!parseYouTubeLink(narrow(a)).empty()) l.links.push_back(a);
+    else if (!parseYouTubeLink(narrow(a)).empty() || !parseSpotifyLink(narrow(a)).empty()) l.links.push_back(a);
   }
   return l;
 }
@@ -204,7 +270,8 @@ void App::applyLaunch(const Launch& l) {
     enterScene(l.scene, running ? 1.4 : 0.15, running || l.play);  // while playing, a new scene keeps playing
   }
   if (!l.plan.empty()) selectPlan(l.plan);
-  if (l.loop >= 0) setLoop(l.loop == 1);
+  if (l.loop == 1) chooseSets(l.sets);
+  else if (l.loop == 0) setLoop(false);
   for (const wstring& link : l.links) pasteText(link);
   if (!l.files.empty()) addFiles(l.files);
   if (l.play && !running) startAll();
@@ -264,9 +331,18 @@ void App::selectPlan(const string& id) {
   if (std::find(plans.begin(), plans.end(), id) == plans.end()) return;
   model.setPlan(id);
   session.setPlan(id);
-  if (running) { session.start(); applyAudio(1.2); }
+  if (running) { cancelClose(); session.start(); applyAudio(1.2); }
   changed();
   save();
+}
+
+// A finished plan fades out for a few seconds before it stops. Whatever starts something new in that time ends the fade.
+void App::cancelClose() {
+  if (!closing) return;
+  closing = false;
+  lastFade = 1;
+  eng.setFade(1);
+  applyStreamVolume();
 }
 
 void App::setLoop(bool on) {
@@ -280,6 +356,100 @@ void App::toggleLoop() {
   setLoop(!model.s.repeat);
   // the setting is kept, but a plan without rounds has nothing to loop: say so instead of looking like nothing happened
   if (!planHasRounds(model.planId())) showToast(model.s.repeat ? L"Loop is on for the timed rounds, like 25·5" : L"Loop is off");
+}
+
+int App::setsChoice() const { return model.s.repeat ? model.s.sets : 1; }
+
+void App::chooseSets(int n) {
+  if (n == 1) { setLoop(false); return; }  // once: the count stays for the next time the loop goes on
+  model.s.sets = n >= 2 ? std::min(n, SETS_MAX) : SETS_FOREVER;
+  session.setSets(model.s.sets);
+  setLoop(true);                           // also repaints and saves
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------------------------------
+
+void App::runStarted() {
+  if (model.clearFinishedTask()) { changed(); save(); }
+}
+
+void App::taskSet(const wstring& text) {
+  if (model.setTask(text)) { changed(); save(); }
+}
+
+void App::taskAddStep(const wstring& text) {
+  if (model.addStep(text)) { changed(); save(); }
+}
+
+void App::taskSetStep(int i, const wstring& text) {
+  if (model.setStep(i, text)) { changed(); save(); }
+}
+
+void App::taskRemoveStep(int i) {
+  if (model.removeStep(i)) { changed(); save(); }
+}
+
+void App::taskTick() {
+  if (model.tickTask()) { changed(); save(); }
+}
+
+void App::taskTickStep(int i) {
+  if (model.tickStep(i)) { changed(); save(); }
+}
+
+void App::taskClear() {
+  const Task t = model.takeTask();
+  if (t.empty()) return;
+  changed();
+  save();
+  showToast(L"Task deleted", L"Undo", [this, t] {
+    App& app = *this;
+    const bool back = app.model.putTask(t);  // not when there is a new task by now
+    app.toast = Toast();                     // this closure lives in the toast: nothing of it is used after this line
+    if (back) { app.changed(); app.save(); }
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Plugins
+// ---------------------------------------------------------------------------------------------------
+
+PluginState App::pluginState() const {
+  const SessionSnap s = session.snapshot();
+  const SceneDef& sc = model.scene();
+  PluginState p;
+  p.scene = sc.custom ? sc.base : sc.id;  // a preset is told as the stock scene it came from
+  p.study = sc.study;
+  p.plan = s.planId;
+  p.running = running && !closing && !s.done;  // a finished plan still fades out for a moment: that is not running
+  p.phase = s.done ? "done" : s.kind == PH_BREAK ? "break" : s.kind == PH_TIMER ? "timer" : s.kind == PH_FREE ? "free" : "focus";
+  p.round = s.cycle ? s.round : 0;
+  p.rounds = s.cycle ? s.rounds : 0;
+  p.remainingMs = s.done || s.duration >= INF_MS ? -1 : s.remaining;
+  return p;
+}
+
+void App::rescanPlugins() {
+  plugins.rescan(model.s.plugins);
+  changed();
+}
+
+void App::setPluginOn(const string& id, bool on) {
+  if (!plugins.setOn(id, on)) return;
+  if (on) model.s.plugins[id] = true; else model.s.plugins.erase(id);
+  changed();
+  save();
+}
+
+void App::pluginSettings(const string& id) {
+  plugins.openSettings(id);
+  changed();
+}
+
+void App::onPluginEvent(const PluginEvent& e) {
+  if (plugins.onEvent(e)) changed();
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -319,7 +489,7 @@ void App::setBand(int band) {
 void App::resetMix() {
   if (model.resetMix()) {  // a preset also returns to its saved plan
     session.setPlan(model.planId());
-    if (running) session.start();
+    if (running) { cancelClose(); session.start(); }
   }
   if (running) applyAudio(0.4); else changed();
   save();
@@ -435,6 +605,7 @@ vector<string> App::candidates() const {
 string App::wantedSpec() const {
   if (!model.s.streamOn) return "";
   if (!model.s.custom.empty()) return model.s.custom;
+  if (const Attach* a = model.attached()) return a->uri;  // the scene's own Spotify playlist, in place of its streams
   const vector<string> c = candidates();
   if (c.empty()) return "";
   return c[(size_t)vIndex_ % c.size()];
@@ -442,8 +613,10 @@ string App::wantedSpec() const {
 
 void App::syncStream(bool play) {
   const string w = wantedSpec();
+  const bool sp = isSpotifySpec(w);
+  if (spotifyOn && (!sp || model.s.tab != "stream")) leaveSpotify();  // the playlist is no longer what should play
   if (!model.s.streamOn || w.empty()) {
-    if (!loadedSpec.empty()) stream.stop();
+    if (!loadedSpec.empty() && !isSpotifySpec(loadedSpec)) stream.stop();
     loadedSpec.clear();
     streamState = (model.s.streamOn && w.empty()) ? SS_NONE : SS_IDLE;
     streamTitle.clear();
@@ -453,8 +626,28 @@ void App::syncStream(bool play) {
   if (streamState == SS_NONE) streamState = SS_IDLE;
   if (model.s.tab != "stream" || !play) { changed(); return; }
   if (w == loadedSpec && (streamState == SS_LOADING || streamState == SS_PLAYING)) {
-    stream.setPaused(false);
+    if (sp) spotify.setPaused(false); else stream.setPaused(false);
     applyStreamVolume();
+    return;
+  }
+  if (sp) {
+    if (!spotifyOn) stream.stop();  // whatever stream was playing gives way
+    loadedSpec = w;
+    if (spotifyOn && w == spLoaded_ && streamState == SS_PLAYING) {  // another scene with the same playlist: it carries on
+      spotify.setPaused(false);
+      applyStreamVolume();
+      changed();
+      return;
+    }
+    streamState = SS_LOADING;
+    streamTitle.clear();
+    spNow = SpotifyNow();
+    spPrivate = false;
+    spotifyOn = true;
+    spLoaded_ = w;
+    spGen_ = spotify.generation() + 1;  // known before the call: its first events can arrive inside it
+    spotify.play(w, model.s.spotifyPrivate, spotifyVolume());
+    changed();
     return;
   }
   streamState = SS_LOADING;
@@ -466,6 +659,7 @@ void App::syncStream(bool play) {
 }
 
 void App::onStreamEvent(const StreamEvent& e) {
+  if (spotifyOn) return;  // mpv has nothing to say while a playlist plays
   if (e.type == StreamEvent::Closed) {
     if (!running || loadedSpec.empty()) { loadedSpec.clear(); streamState = SS_IDLE; changed(); return; }
     if (videoWindow) {  // the video window was closed: carry on with sound only
@@ -532,6 +726,11 @@ void App::stepStream(int dir) {
     if (dir > 0) stream.next(); else stream.prev();
     return;
   }
+  if (spotifyWanted()) {  // a playlist: the next or the previous song
+    if (!running) startAll();
+    else if (spotifyOn && streamState == SS_PLAYING) { if (dir > 0) spotify.next(); else spotify.prev(); }
+    return;
+  }
   const size_t n = candidates().size();
   if (!model.s.custom.empty() || n < 2) return;
   vIndex_ = (int)(((size_t)vIndex_ + n + (size_t)(dir < 0 ? n - 1 : 1)) % n);
@@ -543,6 +742,7 @@ void App::stepStream(int dir) {
 void App::retryStream() {
   vTried_ = 0;
   loadedSpec.clear();
+  spLoaded_.clear();
   if (running) syncStream(true); else startAll();
 }
 
@@ -551,6 +751,7 @@ void App::retryStream() {
 // ---------------------------------------------------------------------------------------------------
 
 int App::toolsMissing() const {
+  if (model.s.tab == "stream" && spotifyWanted()) return 0;  // a playlist plays through Spotifast and needs neither
   int missing = 0;
   if (!stream.available()) missing |= TOOL_MPV;
   if (model.s.tab == "stream" && stream.ytdlpPath().empty()) missing |= TOOL_YTDLP;  // your own music needs only mpv
@@ -624,14 +825,17 @@ void App::toggleStreamOn() {
 }
 
 void App::toggleVideoWindow() {
+  if (model.s.tab == "stream" && spotifyWanted()) return;  // a playlist has no picture
   videoWindow = !videoWindow;
   if (running && streamState != SS_NONE && !loadedSpec.empty()) { loadedSpec.clear(); syncStream(true); }
   changed();
 }
 
 void App::pasteText(const wstring& text) {
+  const string uri = parseSpotifyLink(narrow(text));
+  if (!uri.empty()) { attachSpotify(uri); return; }  // a playlist belongs to the scene that is open
   const string spec = parseYouTubeLink(narrow(text));
-  if (spec.empty()) { showToast(L"That is not a YouTube link"); return; }
+  if (spec.empty()) { showToast(L"That is not a YouTube or Spotify link"); return; }
   model.s.custom = spec;
   model.s.streamOn = true;
   model.s.tab = "stream";
@@ -648,6 +852,7 @@ void App::addFiles(const vector<wstring>& paths) {
   files.insert(files.end(), ok.begin(), ok.end());
   model.s.tab = "files";
   filesLoaded_ = false;
+  leaveSpotify();
   stream.stop();
   loadedSpec.clear();
   if (!running) startAll();
@@ -668,6 +873,7 @@ void App::setTab(const string& tab) {
   if (tab == model.s.tab) return;
   model.s.tab = tab;
   if (tab == "files") {
+    leaveSpotify();
     stream.stop();
     loadedSpec.clear();
     filesLoaded_ = false;
@@ -679,4 +885,168 @@ void App::setTab(const string& tab) {
   }
   changed();
   save();
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Spotify: a playlist tied to a scene, played by Spotifast. See spotify.h for what "private" means here.
+// ---------------------------------------------------------------------------------------------------
+
+void App::leaveSpotify() {
+  if (!spotifyOn) return;
+  spotifyOn = false;
+  spLoaded_.clear();
+  spNow = SpotifyNow();
+  spPrivate = false;
+  spGen_ = 0;
+  spotify.release();
+}
+
+void App::releaseSpotify(int waitMs) {
+  spotifyOn = false;
+  spLoaded_.clear();
+  spGen_ = 0;
+  spotify.release(waitMs);
+}
+
+wstring App::spotifyLine() const {
+  if (!spNow.ok) return L"";
+  return spNow.artists.empty() ? spNow.title : spNow.title + L" · " + spNow.artists;
+}
+
+void App::attachSpotify(const string& uri, const wstring& name, const string& art) {
+  if (!model.setAttach(uri, name, art)) { showToast(L"That is not a Spotify playlist link"); return; }
+  model.s.custom.clear();  // a pasted YouTube link would otherwise stay in front of it
+  model.s.streamOn = true;
+  if (model.s.tab != "stream") {
+    model.s.tab = "stream";
+    stream.stop();
+    filesLoaded_ = false;
+  }
+  vTried_ = 0;
+  loadedSpec.clear();
+  if (model.attached()->name.empty() && onNeedSpotifyInfo) onNeedSpotifyInfo(uri);
+  if (!running) startAll(); else syncStream(true);
+  changed();
+  save();
+}
+
+void App::detachSpotify() {
+  const string scene = model.s.scene;
+  const Attach a = model.takeAttach();
+  if (a.uri.empty()) return;
+  vTried_ = 0;
+  loadedSpec.clear();
+  if (running) {
+    syncStream(true);
+  } else {
+    leaveSpotify();
+    streamState = SS_IDLE;
+    streamTitle.clear();
+    changed();
+  }
+  save();
+  showToast(L"Playlist removed", L"Undo", [this, a, scene] {
+    App& app = *this;
+    const Attach back = a;
+    const string where = scene;
+    app.toast = Toast();  // this closure lives in the toast: nothing of it is used after this line
+    if (app.model.s.attach.count(where)) return;  // another playlist is there by now
+    app.model.s.attach[where] = back;
+    if (app.model.s.scene == where) {
+      app.loadedSpec.clear();
+      if (app.running) app.syncStream(true);
+    }
+    app.changed();
+    app.save();
+  });
+}
+
+void App::setSpotifyInfo(const string& uri, const wstring& name, const string& art) {
+  if (model.setAttachInfo(uri, name, art)) { changed(); save(); }
+}
+
+void App::setSpotifyPrivate(bool on) {
+  if (model.s.spotifyPrivate == on) return;
+  model.s.spotifyPrivate = on;
+  save();
+  if (running && model.s.tab == "stream" && spotifyWanted()) {  // start it again where it now belongs
+    loadedSpec.clear();
+    spLoaded_.clear();
+    syncStream(true);
+  }
+  showToast(on ? L"Private: Spotify will not record what plays here" : L"Not private: Spotify may record what plays here", L"", nullptr, 5000);
+}
+
+void App::onSpotifyEvent(const SpotifyEvent& e) {
+  if (e.type == SpotifyEvent::Released) return;
+  if (!spotifyOn || e.gen != spGen_) return;  // an answer to an older request
+  switch (e.type) {
+    case SpotifyEvent::Playing:
+      streamState = SS_PLAYING;
+      spNow = e.now;
+      spPrivate = e.priv;
+      streamTitle = spotifyLine();
+      if (!running) spotify.setPaused(true);  // it was stopped while the playlist was still on its way
+      applyStreamVolume();
+      changed();
+      break;
+    case SpotifyEvent::Now:
+      spNow = e.now;
+      spPrivate = e.priv;
+      streamTitle = spotifyLine();
+      changed();
+      break;
+    case SpotifyEvent::Failed: {
+      streamState = SS_ERROR;
+      loadedSpec.clear();
+      spLoaded_.clear();
+      spotifyOn = spotify.holding();  // when nothing of Spotifast's was changed there is nothing to give back
+      if (e.reason == "no spotifast") {
+        showToast(L"Spotify playlists play through Spotifast", L"Get it", [this] {
+          App& app = *this;
+          app.toast = Toast();
+          if (app.openUrl) app.openUrl(L"https://spotifast.rocks/download/");
+          app.changed();
+        }, 12000);
+      } else if (e.reason == "no private player" || e.reason == "not private") {
+        showToast(L"Private needs Spotifast’s built-in player", L"Play anyway", [this] {
+          App& app = *this;
+          app.toast = Toast();
+          app.setSpotifyPrivate(false);
+          if (!app.running) app.startAll();
+        }, 14000);
+      } else {
+        showToast(e.reason == "start" ? L"Spotifast did not start" : e.reason == "gone" ? L"Spotifast was closed" : L"Spotify did not start playing", L"Try again", [this] {
+          App& app = *this;
+          app.toast = Toast();
+          app.retryStream();
+        }, 10000);
+      }
+      changed();
+      break;
+    }
+    default: break;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------
+// A link on the clipboard
+// ---------------------------------------------------------------------------------------------------
+
+void App::offerLink(const wstring& text) {
+  if (text.empty() || text.size() > 400 || toast.active()) return;
+  const string t = narrow(text);
+  string spec = parseSpotifyLink(t);
+  const bool sp = !spec.empty();
+  if (!sp && t.find("youtu") != string::npos) spec = parseYouTubeLink(t);  // a link, not any eleven letters that happen to be copied
+  if (spec.empty() || spec == lastOffered_) return;
+  lastOffered_ = spec;
+  const Attach* a = model.attached();
+  if (sp ? (a && a->uri == spec) : (model.s.custom == spec)) return;  // it is what plays already
+  showToast(sp ? L"Spotify link copied" : L"YouTube link copied", sp ? L"Use for " + model.scene().name : L"Play it", [this, text] {
+    App& app = *this;
+    const wstring link = text;
+    app.toast = Toast();
+    app.pasteText(link);
+  }, 9000);
 }

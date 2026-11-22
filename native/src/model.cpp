@@ -3,6 +3,9 @@
 #include <ctime>
 #include <random>
 
+#include "plugins.h"
+#include "spotify.h"
+
 // ---------------------------------------------------------------------------------------------------
 // Stream specs and links
 // ---------------------------------------------------------------------------------------------------
@@ -129,7 +132,93 @@ Json beatJson(const BeatDef& b) {
 
 const char* modeName(int m) { return m == 0 ? "off" : (m == 1 ? "binaural" : "isochronic"); }
 
+// A task as the file holds it: {"t": title, "d": ticked, "s": [{"t": step, "d": ticked}]}. Anything odd is dropped
+// rather than rejected, so a hand-edited file never costs the rest of the settings.
+Task cleanTask(const Json* j) {
+  Task t;
+  if (!j || !j->isObj()) return t;
+  const Json* tx = j->get("t");
+  t.text = tx && tx->isStr() ? cleanTaskText(widen(tx->s), TASK_TEXT) : L"";
+  if (t.text.empty()) return Task();
+  const Json* d = j->get("d");
+  t.done = d && d->boolOr(false);
+  const Json* sj = j->get("s");
+  if (sj && sj->isArr()) {
+    for (auto& s : sj->a) {
+      if (t.steps.size() >= (size_t)TASK_STEPS || !s.isObj()) continue;
+      const Json* st = s.get("t");
+      TaskStep step;
+      step.text = st && st->isStr() ? cleanTaskText(widen(st->s), STEP_TEXT) : L"";
+      if (step.text.empty()) continue;
+      const Json* sd = s.get("d");
+      step.done = sd && sd->boolOr(false);
+      t.steps.push_back(step);
+    }
+  }
+  if (!t.steps.empty()) t.done = false;
+  return t;
+}
+
+// The first version of the to-do kept a task for each round, as an array of four. The one task takes the first of those (with its
+// steps) and any other of them as a step after that, while there is room, so a file from that version loses nothing it can hold.
+Task foldRoundTasks(const Json* j) {
+  Task out;
+  if (!j || !j->isArr()) return out;
+  for (auto& e : j->a) {
+    const Task t = cleanTask(&e);
+    if (t.empty()) continue;
+    if (out.empty()) { out = t; continue; }
+    if (out.steps.size() >= (size_t)TASK_STEPS) break;
+    out.done = false;  // it has steps now, and they decide
+    out.steps.push_back({cleanTaskText(t.text, STEP_TEXT), t.finished()});
+  }
+  return out;
+}
+
+Json taskJson(const Task& t) {
+  Json o = Json::obj();
+  if (t.empty()) return o;
+  o.set("t", Json::str(narrow(t.text)));
+  o.set("d", Json::boolean(t.done));
+  Json steps = Json::arr();
+  for (auto& s : t.steps) {
+    Json so = Json::obj();
+    so.set("t", Json::str(narrow(s.text)));
+    so.set("d", Json::boolean(s.done));
+    steps.push(so);
+  }
+  o.set("s", steps);
+  return o;
+}
+
 }  // namespace
+
+int Task::stepsDone() const {
+  int n = 0;
+  for (auto& s : steps) n += s.done ? 1 : 0;
+  return n;
+}
+
+bool Task::finished() const {
+  if (text.empty()) return false;
+  return steps.empty() ? done : stepsDone() == (int)steps.size();
+}
+
+wstring cleanTaskText(const wstring& in, size_t maxLen) {
+  wstring out;
+  bool gap = false;
+  for (wchar_t c : in) {
+    if (c < 32 || c == 0x7f || std::iswspace(c)) { gap = !out.empty(); continue; }
+    if (gap) { out += L' '; gap = false; }
+    out += c;
+  }
+  if (out.size() > maxLen) {
+    out.resize(maxLen);
+    if (!out.empty() && out.back() >= 0xD800 && out.back() <= 0xDBFF) out.pop_back();  // do not cut an emoji in half
+    while (!out.empty() && out.back() == L' ') out.pop_back();
+  }
+  return out;
+}
 
 bool Model::parse(const string& text, State& out) {
   bool ok = false;
@@ -200,9 +289,58 @@ bool Model::parse(const string& text, State& out) {
   if (const Json* v = j.get("master")) d.master = clampi((int)std::lround(v->numOr(70)), 0, 100);
   if (const Json* v = j.get("blend")) d.blend = clampi((int)std::lround(v->numOr(50)), 0, 100);
   if (const Json* v = j.get("repeat")) d.repeat = v->boolOr(false);
+  if (const Json* v = j.get("sets")) {  // 2 and up is a count; anything else, like a file from before the count, goes on until stopped
+    const int n = (int)std::lround(clampd(v->numOr(0), 0, 1000));
+    d.sets = n >= 2 ? std::min(n, SETS_MAX) : SETS_FOREVER;
+  }
+  if (const Json* tk = j.get("task")) d.task = cleanTask(tk);
+  else if (const Json* old = j.get("tasks")) d.task = foldRoundTasks(old);  // a file from when every round had its own
   if (const Json* v = j.get("streamOn")) d.streamOn = v->boolOr(true);
   if (const Json* v = j.get("custom")) if (v->isStr() && validSpec(v->s) && v->s.compare(0, 5, "file:") != 0) d.custom = v->s;
   if (const Json* v = j.get("tab")) d.tab = v->strOr("stream") == "files" ? "files" : "stream";
+  // {"private": true, "scenes": {"focus": {"uri": "spotify:playlist:...", "name": "...", "art": "https://..."}}}
+  if (const Json* sp = j.get("spotify")) {
+    if (sp->isObj()) {
+      if (const Json* pv = sp->get("private")) d.spotifyPrivate = pv->boolOr(true);
+      const Json* scenes = sp->get("scenes");
+      if (scenes && scenes->isObj()) {
+        for (auto& sl : slots) {
+          const Json* a = scenes->get(sl.id);
+          if (!a || !a->isObj()) continue;
+          const Json *uri = a->get("uri"), *name = a->get("name"), *art = a->get("art");
+          if (!uri || !uri->isStr() || !validSpotifyUri(uri->s)) continue;
+          Attach at;
+          at.uri = uri->s;
+          if (name && name->isStr()) at.name = cleanTaskText(widen(name->s), 80);
+          if (art && art->isStr() && art->s.compare(0, 8, "https://") == 0 && art->s.size() < 300) at.art = art->s;
+          d.attach[sl.id] = at;
+        }
+      }
+    }
+  }
+  // the plugins that are switched on: {"jolt": true}
+  if (const Json* pl = j.get("plugins")) {
+    if (pl->isObj()) for (auto& kv : pl->o) if (kv.second.boolOr(false) && validPluginId(kv.first) && d.plugins.size() < 32) d.plugins[kv.first] = true;
+  }
+  // where the plan was when the window closed: {"scene", "plan", "i", "lap", "ms", "at"}
+  if (const Json* r = j.get("run")) {
+    if (r->isObj()) {
+      const Json *sc = r->get("scene"), *pl = r->get("plan"), *i = r->get("i"), *lap = r->get("lap"), *ms = r->get("ms"), *at = r->get("at");
+      const PlanDef* plan = pl && pl->isStr() ? findPlan(pl->s) : nullptr;
+      bool known = false;
+      if (sc && sc->isStr()) for (auto& sl : slots) if (sl.id == sc->s) known = true;
+      if (known && plan && !plan->phases.empty() && i && i->isNum() && ms && ms->isNum() && at && at->isNum() && at->n > 0) {
+        RunMark m;
+        m.scene = sc->s;
+        m.plan = plan->id;
+        m.index = clampi((int)i->n, 0, (int)plan->phases.size());  // one past the last is the break that closes a set
+        m.lap = lap && lap->isNum() ? clampi((int)lap->n, 0, SETS_MAX) : 0;
+        m.ms = (int64_t)clampd(ms->n, 0, 24 * 3600000.0);
+        m.at = (int64_t)at->n;
+        d.run = m;
+      }
+    }
+  }
   if (const Json* lg = j.get("log")) {
     if (lg->isObj()) {
       std::map<string, double> m;
@@ -233,6 +371,7 @@ bool Model::parse(const string& text, State& out) {
       d.mini = on && on->boolOr(false);
       d.miniX = g("x", INT32_MIN);
       d.miniY = g("y", INT32_MIN);
+      d.miniH = clampi(g("h", 0), 0, 8000);
     }
   }
   out = std::move(d);
@@ -268,9 +407,38 @@ string Model::serialize() const {
   j.set("master", Json::num(s.master));
   j.set("blend", Json::num(s.blend));
   j.set("repeat", Json::boolean(s.repeat));
+  j.set("sets", Json::num(s.sets));
+  j.set("task", taskJson(s.task));
   j.set("streamOn", Json::boolean(s.streamOn));
   j.set("custom", Json::str(s.custom));
   j.set("tab", Json::str(s.tab));
+  Json sp = Json::obj();
+  sp.set("private", Json::boolean(s.spotifyPrivate));
+  Json spScenes = Json::obj();
+  for (auto& kv : s.attach) {
+    Json a = Json::obj();
+    a.set("uri", Json::str(kv.second.uri));
+    a.set("name", Json::str(narrow(kv.second.name)));
+    a.set("art", Json::str(kv.second.art));
+    spScenes.set(kv.first, a);
+  }
+  sp.set("scenes", spScenes);
+  j.set("spotify", sp);
+  if (!s.plugins.empty()) {  // a file from someone without plugins stays as it was
+    Json pl = Json::obj();
+    for (auto& kv : s.plugins) if (kv.second) pl.set(kv.first, Json::boolean(true));
+    j.set("plugins", pl);
+  }
+  if (s.run.valid()) {
+    Json r = Json::obj();
+    r.set("scene", Json::str(s.run.scene));
+    r.set("plan", Json::str(s.run.plan));
+    r.set("i", Json::num(s.run.index));
+    r.set("lap", Json::num(s.run.lap));
+    r.set("ms", Json::num((double)s.run.ms));
+    r.set("at", Json::num((double)s.run.at));
+    j.set("run", r);
+  }
   Json lg = Json::obj();
   for (auto& kv : s.log) lg.set(kv.first, Json::num(std::round(kv.second * 1000) / 1000));
   j.set("log", lg);
@@ -286,6 +454,7 @@ string Model::serialize() const {
   if (s.miniX != INT32_MIN) {
     mi.set("x", Json::num(s.miniX));
     mi.set("y", Json::num(s.miniY));
+    if (s.miniH > 0) mi.set("h", Json::num(s.miniH));
   }
   j.set("mini", mi);
   return jsonString(j, 1);
@@ -535,10 +704,126 @@ bool Model::renamePreset(const string& id, const wstring& nameIn) {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------------------------------
+
+bool Model::setTask(const wstring& textIn) {
+  const wstring text = cleanTaskText(textIn, TASK_TEXT);
+  if (text.empty() || text == s.task.text) return false;
+  s.task.text = text;
+  return true;
+}
+
+bool Model::addStep(const wstring& textIn) {
+  Task& t = s.task;
+  const wstring text = cleanTaskText(textIn, STEP_TEXT);
+  if (t.empty() || text.empty() || t.steps.size() >= (size_t)TASK_STEPS) return false;
+  t.done = false;  // from now on the steps decide
+  t.steps.push_back({text, false});
+  return true;
+}
+
+bool Model::setStep(int i, const wstring& textIn) {
+  Task& t = s.task;
+  const wstring text = cleanTaskText(textIn, STEP_TEXT);
+  if (i < 0 || (size_t)i >= t.steps.size() || text.empty() || text == t.steps[(size_t)i].text) return false;
+  t.steps[(size_t)i].text = text;
+  return true;
+}
+
+bool Model::removeStep(int i) {
+  Task& t = s.task;
+  if (i < 0 || (size_t)i >= t.steps.size()) return false;
+  t.steps.erase(t.steps.begin() + i);
+  if (t.steps.empty()) t.done = false;
+  return true;
+}
+
+bool Model::tickTask() {
+  Task& t = s.task;
+  if (t.empty()) return false;
+  if (t.steps.empty()) {
+    t.done = !t.done;
+  } else {
+    const bool all = !t.finished();  // not finished: tick the rest; finished: untick everything
+    for (auto& st : t.steps) st.done = all;
+  }
+  return true;
+}
+
+bool Model::tickStep(int i) {
+  Task& t = s.task;
+  if (i < 0 || (size_t)i >= t.steps.size()) return false;
+  t.steps[(size_t)i].done = !t.steps[(size_t)i].done;
+  return true;
+}
+
+Task Model::takeTask() {
+  Task t = std::move(s.task);
+  s.task = Task();
+  return t;
+}
+
+bool Model::putTask(const Task& t) {
+  if (t.empty() || !s.task.empty()) return false;
+  s.task = t;
+  return true;
+}
+
+bool Model::clearFinishedTask() {
+  if (!s.task.finished()) return false;
+  s.task = Task();
+  return true;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Spotify playlists
+// ---------------------------------------------------------------------------------------------------
+
+const Attach* Model::attached() const {
+  auto it = s.attach.find(s.scene);
+  return it == s.attach.end() ? nullptr : &it->second;
+}
+
+bool Model::setAttach(const string& uri, const wstring& name, const string& art) {
+  if (!validSpotifyUri(uri)) return false;
+  Attach a;
+  a.uri = uri;
+  a.name = cleanTaskText(name, 80);
+  a.art = art;
+  // a name already learnt for this playlist (on another scene, or here before) is better than none
+  if (a.name.empty()) for (auto& kv : s.attach) if (kv.second.uri == uri && !kv.second.name.empty()) { a.name = kv.second.name; if (a.art.empty()) a.art = kv.second.art; }
+  s.attach[s.scene] = a;
+  return true;
+}
+
+bool Model::setAttachInfo(const string& uri, const wstring& nameIn, const string& art) {
+  const wstring name = cleanTaskText(nameIn, 80);
+  bool any = false;
+  for (auto& kv : s.attach) {
+    if (kv.second.uri != uri) continue;
+    if (!name.empty() && kv.second.name != name) { kv.second.name = name; any = true; }
+    if (!art.empty() && kv.second.art != art) { kv.second.art = art; any = true; }
+  }
+  return any;
+}
+
+Attach Model::takeAttach() {
+  Attach a;
+  auto it = s.attach.find(s.scene);
+  if (it != s.attach.end()) {
+    a = it->second;
+    s.attach.erase(it);
+  }
+  return a;
+}
+
+// ---------------------------------------------------------------------------------------------------
 // Statistics
 // ---------------------------------------------------------------------------------------------------
 
 string Model::dayKey(time_t t) const {
+  t -= (time_t)DAY_STARTS_AT * 3600;  // so 3:59 am still belongs to the evening before, and 4:00 am starts the day
   tm lt;
   localtime_s(&lt, &t);
   char b[16];
@@ -551,9 +836,63 @@ void Model::addFocus(int64_t ms) {
   while (s.log.size() > 60) s.log.erase(s.log.begin());
 }
 
+static bool isDayKey(const string& k) {  // yyyy-mm-dd
+  if (k.size() != 10 || k[4] != '-' || k[7] != '-') return false;
+  for (size_t i = 0; i < k.size(); i++) if (i != 4 && i != 7 && !std::isdigit((unsigned char)k[i])) return false;
+  return true;
+}
+
+double applyLogMoves(State& s, const string& json) {
+  bool ok = false;
+  const Json j = parseJson(json, &ok);
+  const Json* moves = ok && j.isObj() ? j.get("moves") : nullptr;
+  if (!moves || !moves->isArr()) return 0;
+  double total = 0;
+  for (const Json& m : moves->a) {
+    if (!m.isObj()) continue;
+    const Json *from = m.get("from"), *to = m.get("to"), *minutes = m.get("minutes");
+    if (!from || !to || !minutes || !from->isStr() || !to->isStr() || !minutes->isNum()) continue;
+    if (!isDayKey(from->s) || !isDayKey(to->s) || from->s == to->s || !(minutes->n > 0)) continue;
+    auto it = s.log.find(from->s);
+    if (it == s.log.end()) continue;
+    const double take = std::min(minutes->n, it->second);
+    it->second -= take;
+    if (it->second < 0.0005) s.log.erase(it);  // nothing left: the day is simply not in the log
+    s.log[to->s] += take;
+    total += take;
+  }
+  while (s.log.size() > 60) s.log.erase(s.log.begin());
+  return total;
+}
+
+double applyLogNote(State& s, const wstring& notePath) {
+  HANDLE f = CreateFileW(notePath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (f == INVALID_HANDLE_VALUE) return 0;
+  string note;
+  char buf[4096];
+  DWORD got = 0;
+  while (note.size() < (1u << 20) && ReadFile(f, buf, sizeof buf, &got, nullptr) && got) note.append(buf, got);
+  CloseHandle(f);
+  if (!DeleteFileW(notePath.c_str())) return 0;  // what cannot be taken away must not be applied again at every start
+  const double moved = applyLogMoves(s, note);
+  mlog("log: moved %.1f minutes between days (log-moves.json)", moved);
+  return moved;
+}
+
 double Model::todayMinutes() const {
   auto it = s.log.find(dayKey(nowFn()));
   return it == s.log.end() ? 0 : it->second;
+}
+
+int Model::streak() const {
+  const time_t now = nowFn();
+  auto worked = [&](int daysAgo) {
+    auto it = s.log.find(dayKey(now - (time_t)daysAgo * 86400));
+    return it != s.log.end() && it->second >= STREAK_MIN_MINUTES;
+  };
+  int n = 0, d = worked(0) ? 0 : 1;  // today may still be ahead: the run then stands as of yesterday
+  while (n < 60 && worked(d)) { n++; d++; }
+  return n;
 }
 
 std::array<double, 7> Model::week() const {

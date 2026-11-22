@@ -18,7 +18,31 @@ namespace {
 
 constexpr UINT THUMB_PREV = 1001, THUMB_PLAY = 1002, THUMB_NEXT = 1003;
 constexpr UINT WM_APP_STREAM = WM_APP + 1, WM_APP_POSTER = WM_APP + 2, WM_APP_FRESH = WM_APP + 3, WM_APP_SHOW = WM_APP + 4, WM_APP_EDITEND = WM_APP + 5, WM_APP_DEVLOST = WM_APP + 6,
-               WM_APP_SETUP = WM_APP + 7;
+               WM_APP_SETUP = WM_APP + 7, WM_APP_SPOTIFY = WM_APP + 8, WM_APP_SPINFO = WM_APP + 9, WM_APP_SPLISTS = WM_APP + 10, WM_APP_PLUGIN = WM_APP + 11;
+
+// The name and cover of a playlist that was attached by its link, looked up on a worker thread.
+struct SpInfoMsg {
+  string uri, art;
+  wstring title;
+};
+
+// A Spotify cover is fetched only from Spotify's own image hosts, over https.
+bool coverUrl(const string& url, wstring& host, wstring& path) {
+  if (url.compare(0, 8, "https://") != 0 || url.size() > 300) return false;
+  const size_t slash = url.find('/', 8);
+  if (slash == string::npos) return false;
+  string h = url.substr(8, slash - 8);
+  for (char& c : h) c = (char)std::tolower((unsigned char)c);
+  auto ends = [&](const char* tail) {
+    const size_t n = strlen(tail);
+    return h.size() > n && h.compare(h.size() - n, n, tail) == 0;
+  };
+  if (!ends(".scdn.co") && !ends(".spotifycdn.com")) return false;
+  for (unsigned char c : url) if (c <= 32 || c >= 127 || c == '"' || c == '\\') return false;
+  host = widen(h);
+  path = widen(url.substr(slash));
+  return true;
+}
 
 // Progress, and then the result, of fetching mpv and yt-dlp on the worker thread.
 struct SetupMsg {
@@ -28,8 +52,23 @@ struct SetupMsg {
 };
 enum : UINT_PTR { T_TICK = 1, T_SPEC, T_CLOSE, T_SPIN, T_TIP, T_SAVE, T_TOAST, T_SWEEP };
 constexpr wchar_t CLASS_NAME[] = L"MurmurMainWindow";
+
+// A second copy for trying things out while the real one keeps running: with MURMUR_INSTANCE set (to a short name) the
+// window has a class and a single-instance lock of its own, and it opens behind the other windows without taking the focus.
+// Give it a MURMUR_DATA folder as well, or it shares the real state file.
+wstring instanceName() {
+  wchar_t buf[64];
+  const DWORD n = GetEnvironmentVariableW(L"MURMUR_INSTANCE", buf, 64);
+  wstring out;
+  for (DWORD i = 0; i < n && i < 32; i++) if (iswalnum(buf[i])) out += buf[i];
+  return out;
+}
+wstring className() {
+  const wstring inst = instanceName();
+  return inst.empty() ? wstring(CLASS_NAME) : wstring(CLASS_NAME) + L"-" + inst;
+}
 constexpr float MIN_W = 940, MIN_H = 640;    // client size in DIPs
-constexpr float MINI_W = 320, MINI_H = 484;  // the compact player's client size
+// (the compact player's client size is MINI_W by Ui::miniHeight(): as tall as what it holds)
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
@@ -131,6 +170,7 @@ class MainWindow {
   Gfx gfx;
   Engine eng;
   Stream stream;
+  Spotify spotify;
   Spectrum spec;
   std::unique_ptr<App> app;
   std::unique_ptr<Ui> ui;
@@ -140,6 +180,7 @@ class MainWindow {
   string posterAsked;
   wstring statePath;
   int lastMinute = -1;
+  string lastDay;  // the day the "today" in the corner was drawn for
   wstring lastTitle;
   int lastTaskbar = -1;
   int64_t lastRefreshMs = 0;
@@ -153,7 +194,7 @@ class MainWindow {
   HBRUSH editBrush = nullptr;
   COLORREF editBrushColor = 0;
   WNDPROC oldEditProc = nullptr;
-  std::function<void(bool, const wstring&)> editDone;
+  std::function<void(int, const wstring&)> editDone;
   bool editAccent = false;
   int editGen = 0;
 
@@ -187,11 +228,14 @@ class MainWindow {
   HICON makeThumbIcon(const char* name, bool solid);
   void freeThumbIcons();
   void setMini(bool on);
+  SIZE miniWindowSize();   // the compact player's whole window, for the task it holds now
+  void fitMini();          // the task grew or shrank: the window follows
   void handleArgs(const vector<wstring>& args);
   void pasteClipboard();
+  void onActivated();
   void pickFiles();
-  void beginEdit(const R& r, const wstring& text, int maxLen, bool onAccent, std::function<void(bool, const wstring&)> done);
-  void endEdit(bool ok);
+  void beginEdit(const R& r, const wstring& text, int maxLen, bool onAccent, std::function<void(int, const wstring&)> done);
+  void endEdit(int how);  // an EditEnd
   int popup(float x, float y, const vector<wstring>& items);
   void invalidateDip(const R& r);
   float zoom = 1;                           // the UI grows with the window once it is bigger than the layout needs
@@ -274,9 +318,13 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
   softwareRT = _wgetenv(L"MURMUR_SOFTWARE") != nullptr;
   statePath = appDataDir() + L"\\state.json";
 
-  app = std::make_unique<App>(eng, stream);
+  app = std::make_unique<App>(eng, stream, spotify);
   app->model.load(readFile(statePath));
+  // a note for correcting the focus log, left in the data folder by hand: the corrected log is saved at once
+  if (applyLogNote(app->model.s, appDataDir() + L"\\log-moves.json") > 0) writeFileAtomic(statePath, app->model.serialize());
   stream.configure();
+  spotify.configure();
+  app->plugins.configure(appDataDir() + L"\\plugins");
   eng.onOutputLost = [this] { if (hwnd) PostMessageW(hwnd, WM_APP_DEVLOST, 0, 0); };  // from the audio thread
   if (!eng.start(true)) app->showToast(L"No audio device found", L"", nullptr, 8000);
   taskbarMsg = RegisterWindowMessageW(L"TaskbarButtonCreated");
@@ -289,22 +337,30 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
   wc.hIcon = (HICON)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0);
   wc.hIconSm = (HICON)LoadImageW(inst, MAKEINTRESOURCEW(1), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), 0);
   wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-  wc.lpszClassName = CLASS_NAME;
+  const wstring cls = className();
+  wc.lpszClassName = cls.c_str();
   RegisterClassExW(&wc);
 
-  hwnd = CreateWindowExW(0, CLASS_NAME, L"Murmur", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1200, 800, nullptr, nullptr, inst, this);
+  hwnd = CreateWindowExW(0, cls.c_str(), L"Murmur", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT, 1200, 800, nullptr, nullptr, inst, this);
   if (!hwnd) return false;
 
   dark = systemDark();
   ui = std::make_unique<Ui>(*app, gfx, spec);
   ui->hooks.invalidateAll = [this] { if (hwnd) InvalidateRect(hwnd, nullptr, FALSE); };
   ui->hooks.invalidate = [this](const R& r) { invalidateDip(r); };
-  ui->hooks.edit = [this](const R& r, const wstring& t, int n, bool acc, std::function<void(bool, const wstring&)> done) { beginEdit(r, t, n, acc, std::move(done)); };
+  ui->hooks.edit = [this](const R& r, const wstring& t, int n, bool acc, std::function<void(int, const wstring&)> done) { beginEdit(r, t, n, acc, std::move(done)); };
   ui->hooks.openUrl = [](const wstring& u) { ShellExecuteW(nullptr, L"open", u.c_str(), nullptr, nullptr, SW_SHOWNORMAL); };
   ui->hooks.pickFiles = [this] { pickFiles(); };
   ui->hooks.capture = [this](bool on) { if (on) SetCapture(hwnd); else if (GetCapture() == hwnd) ReleaseCapture(); };
   ui->hooks.toggleMini = [this] { setMini(!miniMode); };
   ui->hooks.menu = [this](float x, float y, const vector<wstring>& items) { return popup(x, y, items); };
+  ui->hooks.loadPlaylists = [this] {  // the playlists Spotifast keeps for its sidebar, read off the UI thread
+    const wstring exe = spotify.exePath();
+    runDetached([hw = hwnd, exe] {
+      auto* lists = new vector<SpotifyList>(loadSpotifastLibrary(exe));
+      if (!PostMessageW(hw, WM_APP_SPLISTS, 0, (LPARAM)lists)) delete lists;
+    });
+  };
 
   app->onChange = [this] { onAppChange(); };
   app->onTick = [this] { onAppTick(); };
@@ -338,6 +394,28 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
     });
   };
   stream.setSink([hw = hwnd](const StreamEvent& e) { PostMessageW(hw, WM_APP_STREAM, 0, (LPARAM) new StreamEvent(e)); });
+  spotify.setSink([hw = hwnd](const SpotifyEvent& e) {
+    auto* m = new SpotifyEvent(e);
+    if (!PostMessageW(hw, WM_APP_SPOTIFY, 0, (LPARAM)m)) delete m;
+  });
+  app->plugins.setSink([hw = hwnd](const PluginEvent& e) {  // from a plugin's reader thread
+    auto* m = new PluginEvent(e);
+    if (!PostMessageW(hw, WM_APP_PLUGIN, 0, (LPARAM)m)) delete m;
+  });
+  app->openUrl = [](const wstring& u) { ShellExecuteW(nullptr, L"open", u.c_str(), nullptr, nullptr, SW_SHOWNORMAL); };
+  app->onNeedSpotifyInfo = [hw = hwnd](const string& uri) {  // a pasted link says nothing of the playlist's name: ask Spotify
+    runDetached([hw, uri] {
+      auto* m = new SpInfoMsg;
+      m->uri = uri;
+      if (!spotifyLookup(uri, m->title, m->art) || !PostMessageW(hw, WM_APP_SPINFO, 0, (LPARAM)m)) delete m;
+    });
+  };
+  // a round or a break began, or the plan ended, while another window is in front: the taskbar button asks for a look
+  app->onPhase = [this](bool, bool) {
+    if (!hwnd || miniMode || GetForegroundWindow() == hwnd) return;
+    FLASHWINFO fi = {sizeof fi, hwnd, FLASHW_TRAY, 3, 0};
+    FlashWindowEx(&fi);
+  };
 
   dpi = (float)GetDpiForWindow(hwnd);
   applyTheme();
@@ -360,7 +438,12 @@ bool MainWindow::init(HINSTANCE hi, const vector<wstring>& args, int showCmd) {
     if (_wcsicmp(wstring(self, n).c_str(), installedExePath().c_str()) == 0) updateJumpList(installedExePath());
   }
 
-  ShowWindow(hwnd, app->model.s.maximized ? SW_SHOWMAXIMIZED : (showCmd == SW_SHOWMINNOACTIVE ? SW_SHOWMINNOACTIVE : SW_SHOW));
+  if (!instanceName().empty()) {  // a copy for trying things out stays out of the way
+    SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+  } else {
+    ShowWindow(hwnd, app->model.s.maximized ? SW_SHOWMAXIMIZED : (showCmd == SW_SHOWMINNOACTIVE ? SW_SHOWMINNOACTIVE : SW_SHOW));
+  }
   UpdateWindow(hwnd);
   SetTimer(hwnd, T_SWEEP, 30000, nullptr);
   return true;
@@ -418,6 +501,7 @@ void MainWindow::capturePlacement() {
   if (miniMode) {
     st.miniX = rc.left;
     st.miniY = rc.top;
+    st.miniH = rc.bottom - rc.top;
     return;
   }
   st.winX = rc.left;
@@ -430,11 +514,39 @@ void MainWindow::capturePlacement() {
 void MainWindow::saveState() {
   KillTimer(hwnd, T_SAVE);
   capturePlacement();
+  app->noteRun();  // where the plan is, so a restart soon after carries on from here
   writeFileAtomic(statePath, app->model.serialize());
 }
 
-// The compact player: a small fixed-size window that stays on top of the others, so the clock is always in
-// sight while you work. Leaving it puts the full window back where it was.
+// The compact player's window for what it holds now: MINI_W wide, as tall as the UI says, plus the frame.
+SIZE MainWindow::miniWindowSize() {
+  RECT rc = {0, 0, (LONG)std::lround(MINI_W * dpi / 96.f), (LONG)std::lround(ui->miniHeight() * dpi / 96.f)};
+  AdjustWindowRectExForDpi(&rc, (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE), FALSE, 0, (UINT)dpi);
+  return {rc.right - rc.left, rc.bottom - rc.top};
+}
+
+// The task gained or lost a step, or the scene has no task: the window follows. A player in the lower half of its screen
+// keeps its bottom edge and grows upwards (it usually sits in a bottom corner); one in the upper half keeps its top. Growing
+// never pushes it off the screen.
+void MainWindow::fitMini() {
+  if (!miniMode || !hwnd || IsIconic(hwnd)) return;
+  const SIZE want = miniWindowSize();
+  RECT wr;
+  if (!GetWindowRect(hwnd, &wr) || (wr.bottom - wr.top == want.cy && wr.right - wr.left == want.cx)) return;
+  MONITORINFO mi = {};
+  mi.cbSize = sizeof mi;
+  GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+  const RECT& wk = mi.rcWork;
+  const bool low = (wr.top + wr.bottom) / 2 > (wk.top + wk.bottom) / 2;
+  int y = low ? wr.bottom - want.cy : wr.top;
+  if (y + want.cy > wk.bottom && wr.bottom <= wk.bottom) y = wk.bottom - want.cy;
+  if (y < wk.top && wr.top >= wk.top) y = wk.top;
+  SetWindowPos(hwnd, nullptr, wr.left, y, want.cx, want.cy, SWP_NOZORDER | SWP_NOACTIVATE);
+  SetTimer(hwnd, T_SAVE, 300, nullptr);
+}
+
+// The compact player: a small window that stays on top of the others, so the clock and the task are always in sight while
+// you work. It cannot be resized by hand: it is as tall as what it holds. Leaving it puts the full window back where it was.
 void MainWindow::setMini(bool on) {
   if (on == miniMode || !hwnd) return;
   if (edit) endEdit(false);
@@ -448,9 +560,10 @@ void MainWindow::setMini(bool on) {
     LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
     style &= ~(LONG_PTR)(WS_THICKFRAME | WS_MAXIMIZEBOX);
     SetWindowLongPtrW(hwnd, GWL_STYLE, style);
-    RECT rc = {0, 0, (LONG)std::lround(MINI_W * dpi / 96.f), (LONG)std::lround(MINI_H * dpi / 96.f)};
-    AdjustWindowRectExForDpi(&rc, (DWORD)style, FALSE, 0, (UINT)dpi);
-    const int w = rc.right - rc.left, h = rc.bottom - rc.top;
+    KillTimer(hwnd, T_SPEC);  // there is no spectrum on the compact player, so nothing needs analysing
+    specAwake = false;
+    const SIZE size = miniWindowSize();
+    const int w = size.cx, h = size.cy;
     // the lower right corner of the screen the window is on, unless it was left somewhere else last time
     MONITORINFO mi = {};
     mi.cbSize = sizeof mi;
@@ -459,9 +572,26 @@ void MainWindow::setMini(bool on) {
     int x = (int)mi.rcWork.right - w - margin, y = (int)mi.rcWork.bottom - h - margin;
     if (st.miniX != INT32_MIN) {
       const POINT pt = {st.miniX + 40, st.miniY + 20};
-      if (MonitorFromPoint(pt, MONITOR_DEFAULTTONULL)) { x = st.miniX; y = st.miniY; }
+      if (HMONITOR there = MonitorFromPoint(pt, MONITOR_DEFAULTTONULL)) {
+        x = st.miniX;
+        y = st.miniY;
+        // it was left there at another height (the task has changed since): in the lower half of its screen it keeps the
+        // bottom edge it had, as it does while it is open
+        MONITORINFO was = {};
+        was.cbSize = sizeof was;
+        if (GetMonitorInfoW(there, &was)) {
+          const RECT& wk = was.rcWork;
+          // a place saved before the height followed the task has no height with it: the player was 484 tall then
+          const int oldH = st.miniH > 0 ? st.miniH : h - (int)std::lround(ui->miniHeight() * dpi / 96.f) + (int)std::lround(484 * dpi / 96.f);
+          if (oldH != h && st.miniY + oldH / 2 > (wk.top + wk.bottom) / 2) y = st.miniY + oldH - h;
+          // and being taller now than it was must not put it off a screen it was on
+          if (y + h > wk.bottom && st.miniY + oldH <= wk.bottom) y = wk.bottom - h;
+          if (y < wk.top && st.miniY >= wk.top) y = wk.top;
+        }
+      }
     }
-    SetWindowPos(hwnd, HWND_TOPMOST, x, y, w, h, SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    // on top of the other windows; a copy for trying things out (MURMUR_INSTANCE) stays behind them instead
+    SetWindowPos(hwnd, instanceName().empty() ? HWND_TOPMOST : HWND_BOTTOM, x, y, w, h, SWP_FRAMECHANGED | SWP_NOACTIVATE);
   } else {
     miniMode = false;
     st.mini = false;
@@ -472,6 +602,7 @@ void MainWindow::setMini(bool on) {
     SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_FRAMECHANGED | SWP_NOACTIVATE);
     restorePlacement();
     if (st.maximized) ShowWindow(hwnd, SW_SHOWMAXIMIZED);
+    if (app->running) wakeSpectrum();  // the full window has its spectrum back
   }
   SetTimer(hwnd, T_SAVE, 300, nullptr);
   InvalidateRect(hwnd, nullptr, FALSE);
@@ -583,6 +714,7 @@ void MainWindow::rearmTick() {
 
 void MainWindow::wakeSpectrum() {
   spec.idle = 0;
+  if (miniMode) return;  // the compact player draws no spectrum
   if (!specAwake && !minimized) {
     specAwake = true;
     SetTimer(hwnd, T_SPEC, 66, nullptr);
@@ -600,6 +732,7 @@ void MainWindow::updateToastTimer() {
 
 void MainWindow::onAppChange() {
   ui->changed();
+  fitMini();  // the task may have gained or lost a row
   InvalidateRect(hwnd, nullptr, FALSE);
   rearmTick();
   if (app->closing) SetTimer(hwnd, T_CLOSE, 120, nullptr);
@@ -717,16 +850,17 @@ void MainWindow::updateThumbButtons() {
   if (!taskbar || !thumbIcons[0]) return;
   const SessionSnap s = app->session.snapshot();
   const bool next = s.cycle && !s.done;
-  const int key = (app->running ? 1 : 0) | (next ? 2 : 0);
+  const bool playing = app->running && !s.done;  // a finished plan still fading out is not playing: the button starts it again
+  const int key = (playing ? 1 : 0) | (next ? 2 : 0) | (s.done ? 4 : 0);
   if (key == thumbKey) return;
   thumbKey = key;
   THUMBBUTTON b[3] = {};
   const UINT ids[3] = {THUMB_PREV, THUMB_PLAY, THUMB_NEXT};
-  const wchar_t* tips[3] = {L"Restart phase", app->running ? L"Pause" : L"Play", L"Skip phase"};
+  const wchar_t* tips[3] = {L"Restart phase", s.done ? L"Start again" : playing ? L"Pause" : L"Play", L"Skip phase"};
   for (int i = 0; i < 3; i++) {
     b[i].dwMask = (THUMBBUTTONMASK)(THB_ICON | THB_TOOLTIP | THB_FLAGS);
     b[i].iId = ids[i];
-    b[i].hIcon = i == 0 ? thumbIcons[0] : i == 1 ? thumbIcons[app->running ? 2 : 1] : thumbIcons[3];
+    b[i].hIcon = i == 0 ? thumbIcons[0] : i == 1 ? thumbIcons[playing ? 2 : 1] : thumbIcons[3];
     wcsncpy(b[i].szTip, tips[i], 259);
     b[i].dwFlags = (i == 2 && !next) ? THBF_DISABLED : THBF_ENABLED;
   }
@@ -790,9 +924,17 @@ void MainWindow::onTimer(UINT_PTR id) {
       KillTimer(hwnd, T_TOAST);
       app->expireToast(wallMs());
       break;
-    case T_SWEEP:
+    case T_SWEEP: {
       eng.sweep();
+      // the day rolls over at 4 am, which a window left open and idle would not notice: refresh the "today" in the corner
+      const string day = app->model.dayKey(app->model.nowFn());
+      if (day != lastDay) {
+        if (!lastDay.empty() && !minimized) invalidateDip(ui->statsRect());
+        lastDay = day;
+        lastMinute = -1;
+      }
       break;
+    }
     default: break;
   }
 }
@@ -802,6 +944,17 @@ void MainWindow::wantPoster() {
   if (id == posterAsked) return;
   posterAsked = id;
   if (id.empty() || ui->hasPoster(id)) return;
+  if (id.compare(0, 2, "s:") == 0) {  // a Spotify cover: every song has its own, so it is fetched and never kept on disk
+    wstring host, path;
+    if (!coverUrl(id.substr(2), host, path)) return;
+    runDetached([hw = hwnd, id, host, path] {
+      auto* m = new PosterMsg;
+      m->id = id;
+      m->ok = httpsGet(host, path, m->bytes, 6000);
+      if (!PostMessageW(hw, WM_APP_POSTER, 0, (LPARAM)m)) delete m;
+    });
+    return;
+  }
   const wstring dir = appDataDir() + L"\\posters";
   const wstring path = dir + L"\\" + widen(id) + L".jpg";
   const string cached = readFile(path);
@@ -832,7 +985,26 @@ void MainWindow::pasteClipboard() {
     if (const wchar_t* p = (const wchar_t*)GlobalLock(h)) { text = p; GlobalUnlock(h); }
   }
   CloseClipboard();
-  if (!text.empty()) app->pasteText(text);
+  if (text.empty()) return;
+  if (ui->sheet() == 5) ui->pasteInto(text);  // the playlist picker: a link is used, anything else goes to its filter
+  else app->pasteText(text);
+}
+
+// The window came to the front: a YouTube or Spotify link that was just copied is offered (once, and only offered), and a
+// playlist's song is looked at again, since it may have been changed in Spotify itself meanwhile.
+void MainWindow::onActivated() {
+  spotify.refresh();
+  if (ui->sheet() == 6) app->rescanPlugins();  // a plugin put in the folder while the sheet was open is listed on coming back
+  if (ui->sheet() || edit || !OpenClipboard(hwnd)) return;
+  wstring text;
+  if (HANDLE h = GetClipboardData(CF_UNICODETEXT)) {
+    if (const wchar_t* p = (const wchar_t*)GlobalLock(h)) {
+      text.assign(p, wcsnlen(p, 401));
+      GlobalUnlock(h);
+    }
+  }
+  CloseClipboard();
+  if (!text.empty() && text.size() <= 400) app->offerLink(text);
 }
 
 void MainWindow::pickFiles() {
@@ -871,8 +1043,8 @@ int MainWindow::popup(float x, float y, const vector<wstring>& items) {
   return cmd - 1;
 }
 
-void MainWindow::beginEdit(const R& r, const wstring& text, int maxLen, bool onAccent, std::function<void(bool, const wstring&)> done) {
-  if (edit) endEdit(true);
+void MainWindow::beginEdit(const R& r, const wstring& text, int maxLen, bool onAccent, std::function<void(int, const wstring&)> done) {
+  if (edit) endEdit(EDIT_BLUR);
   const int fontPx = (int)std::lround(12.5f * s());
   editFont = CreateFontW(-fontPx, 0, 0, 0, FW_MEDIUM, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                          DEFAULT_PITCH | FF_DONTCARE, gfx.family.c_str());
@@ -892,7 +1064,7 @@ void MainWindow::beginEdit(const R& r, const wstring& text, int maxLen, bool onA
   SendMessageW(edit, EM_SETSEL, 0, -1);
 }
 
-void MainWindow::endEdit(bool ok) {
+void MainWindow::endEdit(int how) {
   if (!edit) return;
   wchar_t buf[512] = {0};
   GetWindowTextW(edit, buf, 512);
@@ -904,7 +1076,7 @@ void MainWindow::endEdit(bool ok) {
   DestroyWindow(e);
   if (editFont) { DeleteObject(editFont); editFont = nullptr; }
   if (GetFocus() != hwnd) SetFocus(hwnd);
-  if (done) done(ok, text);
+  if (done) done(how, text);
   InvalidateRect(hwnd, nullptr, FALSE);
 }
 
@@ -913,14 +1085,14 @@ LRESULT CALLBACK editProc(HWND h, UINT m, WPARAM w, LPARAM l) {
   switch (m) {
     case WM_GETDLGCODE: return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
     case WM_KEYDOWN:
-      if (w == VK_RETURN) { PostMessageW(self->hwnd, WM_APP_EDITEND, 1, self->editGen); return 0; }
-      if (w == VK_ESCAPE) { PostMessageW(self->hwnd, WM_APP_EDITEND, 0, self->editGen); return 0; }
+      if (w == VK_RETURN) { PostMessageW(self->hwnd, WM_APP_EDITEND, EDIT_ENTER, self->editGen); return 0; }
+      if (w == VK_ESCAPE) { PostMessageW(self->hwnd, WM_APP_EDITEND, EDIT_CANCEL, self->editGen); return 0; }
       if (w == 'A' && (GetKeyState(VK_CONTROL) & 0x8000)) { SendMessageW(h, EM_SETSEL, 0, -1); return 0; }
       break;
     case WM_CHAR:
       if (w == VK_RETURN || w == VK_ESCAPE) return 0;
       break;
-    case WM_KILLFOCUS: PostMessageW(self->hwnd, WM_APP_EDITEND, 1, self->editGen); break;
+    case WM_KILLFOCUS: PostMessageW(self->hwnd, WM_APP_EDITEND, EDIT_BLUR, self->editGen); break;
     default: break;
   }
   return CallWindowProcW(self->oldEditProc, h, m, w, l);
@@ -945,23 +1117,26 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
     case WM_ERASEBKGND: return 1;
     case WM_DISPLAYCHANGE: InvalidateRect(hwnd, nullptr, FALSE); return 0;
     case WM_SIZE:
+    {
+      const bool wasMinimized = minimized;
       minimized = w == SIZE_MINIMIZED;
       if (minimized) { KillTimer(hwnd, T_SPEC); KillTimer(hwnd, T_SPIN); specAwake = false; }
       else {
         onSize(LOWORD(l), HIWORD(l));
+        if (wasMinimized) fitMini();  // what it holds may have changed while it was down
         if (app->running) wakeSpectrum();
         if (ui->wantsSpinner()) SetTimer(hwnd, T_SPIN, 33, nullptr);
       }
       return 0;
+    }
     case WM_EXITSIZEMOVE: SetTimer(hwnd, T_SAVE, 300, nullptr); return 0;
     case WM_DPICHANGED: onDpi(HIWORD(w), (const RECT*)l); return 0;
     case WM_GETMINMAXINFO: {
       auto* mi = (MINMAXINFO*)l;
       if (miniMode) {
-        RECT mr = {0, 0, (LONG)std::lround(MINI_W * dpi / 96.f), (LONG)std::lround(MINI_H * dpi / 96.f)};
-        AdjustWindowRectExForDpi(&mr, (DWORD)GetWindowLongPtrW(hwnd, GWL_STYLE), FALSE, 0, (UINT)dpi);
-        mi->ptMinTrackSize.x = mi->ptMaxTrackSize.x = mi->ptMaxSize.x = mr.right - mr.left;
-        mi->ptMinTrackSize.y = mi->ptMaxTrackSize.y = mi->ptMaxSize.y = mr.bottom - mr.top;
+        const SIZE mini = miniWindowSize();
+        mi->ptMinTrackSize.x = mi->ptMaxTrackSize.x = mi->ptMaxSize.x = mini.cx;
+        mi->ptMinTrackSize.y = mi->ptMaxTrackSize.y = mi->ptMaxSize.y = mini.cy;
         return 0;
       }
       RECT rc = {0, 0, (LONG)std::lround(MIN_W * dpi / 96.f), (LONG)std::lround(MIN_H * dpi / 96.f)};
@@ -1024,6 +1199,12 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
       if (ui->key((int)w, ctrl, shift)) return 0;
       break;
     }
+    case WM_CHAR:
+      if (ui->character((wchar_t)w)) return 0;
+      break;
+    case WM_ACTIVATE:
+      if (LOWORD(w) != WA_INACTIVE && !HIWORD(w)) onActivated();
+      break;
     case WM_APPCOMMAND:
       switch (GET_APPCOMMAND_LPARAM(l)) {
         case APPCOMMAND_MEDIA_PLAY_PAUSE: app->togglePlay(); return TRUE;
@@ -1061,7 +1242,7 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
       app->outputLost();
       return 0;
     case WM_APP_EDITEND:
-      if ((int)l == editGen) endEdit(w != 0);
+      if ((int)l == editGen) endEdit((int)w);
       return 0;
     case WM_APP_STREAM: {
       std::unique_ptr<StreamEvent> e((StreamEvent*)l);
@@ -1070,8 +1251,29 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
     }
     case WM_APP_POSTER: {
       std::unique_ptr<PosterMsg> p((PosterMsg*)l);
+      if (p->id != posterAsked) return 0;  // another picture has been asked for since: this one is no longer wanted
       Com<IWICBitmap> bmp = p->ok ? decodeImage(gfx, p->bytes) : Com<IWICBitmap>();
       ui->setPoster(p->id, bmp, !bmp);
+      return 0;
+    }
+    case WM_APP_SPOTIFY: {
+      std::unique_ptr<SpotifyEvent> e((SpotifyEvent*)l);
+      app->onSpotifyEvent(*e);
+      return 0;
+    }
+    case WM_APP_PLUGIN: {
+      std::unique_ptr<PluginEvent> e((PluginEvent*)l);
+      app->onPluginEvent(*e);
+      return 0;
+    }
+    case WM_APP_SPINFO: {
+      std::unique_ptr<SpInfoMsg> m((SpInfoMsg*)l);
+      app->setSpotifyInfo(m->uri, m->title, m->art);
+      return 0;
+    }
+    case WM_APP_SPLISTS: {
+      std::unique_ptr<vector<SpotifyList>> lists((vector<SpotifyList>*)l);
+      ui->setPlaylists(std::move(*lists));
       return 0;
     }
     case WM_APP_FRESH: {
@@ -1116,7 +1318,7 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
       return TRUE;
     }
     case WM_CLOSE:
-      if (edit) endEdit(false);
+      if (edit) endEdit(EDIT_CANCEL);
       saveState();
       DestroyWindow(hwnd);
       return 0;
@@ -1124,6 +1326,9 @@ LRESULT MainWindow::onMessage(UINT m, WPARAM w, LPARAM l) {
       if (drop) { RevokeDragDrop(hwnd); drop->Release(); drop = nullptr; OleUninitialize(); }
       for (UINT_PTR id : {T_TICK, T_SPEC, T_CLOSE, T_SPIN, T_TIP, T_SAVE, T_TOAST, T_SWEEP}) KillTimer(hwnd, id);
       app->stopAll();
+      app->plugins.shutdown();   // they have just heard that nothing is running; now their input ends
+      app->releaseSpotify(3000);  // Spotifast gets its volume, shuffle, repeat and device back before we go
+      spotify.shutdown();
       stream.shutdown();
       eng.shutdown();
       freeThumbIcons();
@@ -1159,9 +1364,10 @@ int runApp(HINSTANCE inst, const vector<wstring>& args, int showCmd) {
   SetCurrentProcessExplicitAppUserModelID(L"Murmur.App");
 
   // one window: a second launch hands its arguments to the first and leaves
-  HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\Murmur.SingleInstance");
+  const wstring copy = instanceName();
+  HANDLE mutex = CreateMutexW(nullptr, FALSE, (L"Local\\Murmur.SingleInstance" + (copy.empty() ? L"" : L"." + copy)).c_str());
   if (mutex && GetLastError() == ERROR_ALREADY_EXISTS) {
-    if (HWND other = FindWindowW(CLASS_NAME, nullptr)) {
+    if (HWND other = FindWindowW(className().c_str(), nullptr)) {
       DWORD pid = 0;
       GetWindowThreadProcessId(other, &pid);
       AllowSetForegroundWindow(pid);

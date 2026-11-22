@@ -69,7 +69,7 @@ jobs:
         run: |
           $info = (Get-Item native/bin/Murmur.exe).VersionInfo
           "Murmur.exe says: product $($info.ProductVersion), file $($info.FileVersion)"
-          $want = if ($env:APP_VERSION) { $env:APP_VERSION } else { '1.0.0' }
+          $want = if ($env:APP_VERSION) { $env:APP_VERSION } else { '1.1.0' }  # a plain build: the numbers in native/src/version.h
           if ($info.ProductVersion -ne $want) { throw "Expected version $want" }
 
       - uses: actions/upload-artifact@v7
@@ -175,8 +175,6 @@ jobs:
           Murmur: focus sounds that run themselves. Murmur.exe is the whole app. Run it to start, or run `Murmur.exe --install` to add it to the Start menu (no admin rights needed).
 
           It is not code-signed yet, so Windows SmartScreen may ask you to confirm the first run (More info, then Run anyway). `Murmur.exe.sha256` holds the SHA-256 to check the download against.
-
-          Code signing policy: https://github.com/Goodly58/murmur#code-signing-policy
           EOF
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release upload "$TAG" Murmur.exe Murmur.exe.sha256 --clobber --repo "$GITHUB_REPOSITORY"

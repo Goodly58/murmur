@@ -530,6 +530,144 @@ void testSessionLoop(TestLog& t) {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// Loop with a count: a number of sets, and then the plan ends.
+// ---------------------------------------------------------------------------------------------------
+
+void testSessionSets(TestLog& t) {
+  int64_t clock = 1000000;
+  struct Rec { int phases = 0, dones = 0; SessionSnap last; } r;
+  Session::Hooks h;
+  h.onTick = [&](const SessionSnap& s) { r.last = s; };
+  h.onPhase = [&](const SessionSnap& s, PhaseKind) { r.phases++; r.last = s; };
+  h.onDone = [&](const SessionSnap& s) { r.dones++; r.last = s; };
+  Session s(h, [&] { return clock; });
+  auto advance = [&](int64_t ms) { clock += ms; s.tick(); };
+  const int64_t MIN = 60000;
+  auto fresh = [&](const char* plan, int sets) {  // a new run of `plan`, looping `sets` times
+    r = Rec();
+    s.setLoop(true);
+    s.setSets(sets);
+    s.setPlan(plan);
+    s.start();
+  };
+
+  t.check("sets: no count to begin with, so a loop goes on until stopped", s.sets() == SETS_FOREVER);
+  s.setSets(1);
+  t.check("sets: one is not a count", s.sets() == SETS_FOREVER);
+  s.setSets(-5);
+  t.check("sets: nor is a negative number", s.sets() == SETS_FOREVER);
+  s.setSets(500);
+  t.check("sets: the most is ninety-nine", s.sets() == SETS_MAX && SETS_MAX == 99);
+  s.setSets(4);
+  t.check("sets: four is four", s.sets() == 4);
+
+  // two sets of 25·5: 115 minutes, a break of 5, 115 minutes
+  fresh("p25", 2);
+  SessionSnap a = s.snapshot();
+  t.check("sets: the snapshot carries the count", a.loop && a.sets == 2 && a.lap == 0, fmt("sets %d, lap %d", a.sets, a.lap));
+  advance(115 * MIN);
+  a = s.snapshot();
+  t.check("sets: the first set ends in the closing break, as any loop does", !s.done() && a.kind == PH_BREAK && a.index == 7 && a.lap == 0 && r.dones == 0);
+  advance(5 * MIN);
+  a = s.snapshot();
+  t.check("sets: then the second set begins", a.kind == PH_FOCUS && a.round == 1 && a.lap == 1 && a.sets == 2 && !s.done());
+  advance(114 * MIN);
+  t.check("sets: in its last round", s.snapshot().kind == PH_FOCUS && s.snapshot().round == 4 && !s.done());
+  advance(1 * MIN);
+  a = s.snapshot();
+  t.check("sets: the last round of the last set is the end, with no closing break after it",
+          s.done() && !s.running() && r.dones == 1 && a.kind == PH_FOCUS && a.round == 4 && a.lap == 1, fmt("done %d, dones %d, kind %d, round %d, lap %d", s.done(), r.dones, (int)a.kind, a.round, a.lap));
+  t.check("sets: fourteen phases were announced on the way", r.phases == 14, std::to_string(r.phases));
+  s.start();
+  a = s.snapshot();
+  t.check("sets: play after the end starts everything again, from the first set", !s.done() && s.running() && a.lap == 0 && a.round == 1 && a.sets == 2);
+
+  // skipping goes through the closing break, and out of the last round ends it
+  fresh("p25", 2);
+  for (int i = 0; i < 8; i++) s.skip();
+  t.check("sets: skipping goes through the closing break into the second set", s.snapshot().lap == 1 && s.snapshot().index == 0 && !s.done());
+  for (int i = 0; i < 6; i++) s.skip();
+  t.check("sets: and on to its last round", s.snapshot().index == 6 && s.snapshot().round == 4 && !s.done());
+  s.skip();
+  t.check("sets: skipping out of that ends the plan", s.done() && r.dones == 1);
+
+  // a long gap (the PC slept) lands where the clock says, and never past the end
+  fresh("p25", 3);
+  advance(250 * MIN);
+  a = s.snapshot();
+  t.check("sets: a gap of 250 minutes lands ten minutes into the third set", a.lap == 2 && a.round == 1 && a.elapsed == 10 * MIN && !s.done() && a.sets == 3,
+          fmt("lap %d, round %d, %d min", a.lap, a.round, (int)(a.elapsed / MIN)));
+  advance(104 * MIN);
+  t.check("sets: and a minute short of the end it is still going", !s.done() && s.snapshot().kind == PH_FOCUS && s.snapshot().round == 4);
+  advance(1 * MIN);
+  t.check("sets: and then it ends", s.done() && r.dones == 1);
+  fresh("p25", 3);
+  advance(1000 * MIN);
+  a = s.snapshot();
+  t.check("sets: a gap longer than all of it ends it once, in the last set", s.done() && r.dones == 1 && a.lap == 2 && a.round == 4, fmt("dones %d, lap %d, round %d", r.dones, a.lap, a.round));
+  t.check("sets: and the sets it skipped were not replayed", r.phases == 6, std::to_string(r.phases));
+  fresh("p25", 3);
+  advance(116 * MIN);
+  t.check("sets: in the break that closes the first of three", s.snapshot().kind == PH_BREAK && s.snapshot().index == 7 && s.snapshot().lap == 0);
+  advance(130 * MIN);
+  a = s.snapshot();
+  t.check("sets: a gap from there lands six minutes into the third set", a.lap == 2 && a.index == 0 && a.elapsed == 6 * MIN && !s.done(), fmt("lap %d, index %d, %d ms", a.lap, a.index, (int)a.elapsed));
+  fresh("p25", 2);
+  advance(116 * MIN);
+  advance(500 * MIN);
+  t.check("sets: a gap from the closing break that runs past the end ends it in the second set", s.done() && r.dones == 1 && s.snapshot().lap == 1);
+  t.check("sets: that last set is played out phase by phase, not skipped: seven phases to the closing break, then seven more", r.phases == 14, std::to_string(r.phases));
+
+  // changing the count while it runs
+  fresh("p25", 4);
+  advance(130 * MIN);
+  t.check("sets: in the second of four", s.snapshot().lap == 1 && s.snapshot().sets == 4);
+  s.setSets(2);
+  t.check("sets: lowered to two, the set in progress becomes the last", s.snapshot().sets == 2 && s.snapshot().lap == 1);
+  advance(105 * MIN);
+  t.check("sets: and the plan ends with it", s.done() && r.dones == 1);
+  fresh("p25", 5);
+  advance(245 * MIN);
+  s.setSets(2);
+  a = s.snapshot();
+  t.check("sets: lowered below the sets already played, the one in progress is the last and shows as such", a.lap == 2 && a.sets == 3 && !s.done(), fmt("lap %d, sets %d", a.lap, a.sets));
+  advance(110 * MIN);
+  t.check("sets: and it ends there", s.done() && r.dones == 1);
+  fresh("p25", 2);
+  advance(220 * MIN);
+  s.setSets(3);
+  advance(15 * MIN);
+  a = s.snapshot();
+  t.check("sets: raised in the last set, it goes on into a closing break and a third set", !s.done() && a.kind == PH_BREAK && a.index == 7 && a.sets == 3 && a.lap == 1);
+  s.setLoop(false);
+  a = s.snapshot();
+  t.check("sets: with the loop off the snapshot has no count, but the setting stays", !a.loop && a.sets == 0 && s.sets() == 3);
+  advance(5 * MIN);
+  t.check("sets: and the break that was running ends the plan", s.done() && r.dones == 1);
+
+  // the other plans, and the ones without rounds
+  fresh("p50", 2);
+  advance(349 * MIN);
+  t.check("sets: 50·10 twice is 350 minutes: a minute short", !s.done());
+  advance(1 * MIN);
+  t.check("sets: and then it ends", s.done() && r.dones == 1);
+  fresh("p15", 3);
+  advance((3 * 69 + 2 * 3) * MIN - MIN);
+  t.check("sets: 15·3 three times is 213 minutes: a minute short", !s.done() && s.snapshot().lap == 2);
+  advance(1 * MIN);
+  t.check("sets: and then it ends", s.done() && r.dones == 1);
+  fresh("t30", 3);
+  advance(31 * MIN);
+  a = s.snapshot();
+  t.check("sets: a timer ignores the count", s.done() && r.dones == 1 && !a.loop && a.sets == 0);
+
+  // how long they take
+  t.check("sets: one set of 25·5 is 115 minutes, four with the breaks between are 475", planSetMs("p25") == 115 * MIN && planBreakMs("p25") == 5 * MIN && planLoopMs("p25", 4) == 475 * MIN);
+  t.check("sets: 50·10 twice is 350 and 15·3 three times 213", planLoopMs("p50", 2) == 350 * MIN && planLoopMs("p15", 3) == 213 * MIN);
+  t.check("sets: no count is one set, and a plan without rounds has no breaks", planLoopMs("p25", 0) == 115 * MIN && planBreakMs("free") == 0 && planLoopMs("nonsense", 3) == 0);
+}
+
+// ---------------------------------------------------------------------------------------------------
 // Model: scenes, presets, persistence, links, statistics.
 // ---------------------------------------------------------------------------------------------------
 
@@ -697,7 +835,9 @@ void testApp(TestLog& t) {
   Stream st;
   st.setDryRun(true);
   st.configure(L"mpv.exe", L"yt-dlp.exe");  // pretend both are installed
-  App app(eng, st);
+  Spotify sp;
+  sp.setInline(true);
+  App app(eng, st, sp);
   int64_t clock = 5000000;
   time_t today = 1760000000;
   app.session.setClock([&] { return clock; });
@@ -873,7 +1013,9 @@ void testAppLoop(TestLog& t) {
   Stream st;
   st.setDryRun(true);
   st.configure(L"mpv.exe", L"yt-dlp.exe");
-  App app(eng, st);
+  Spotify sp;
+  sp.setInline(true);
+  App app(eng, st, sp);
   int64_t clock = 5000000;
   time_t today = 1760000000;
   app.session.setClock([&] { return clock; });
@@ -931,7 +1073,7 @@ void testAppLoop(TestLog& t) {
   Stream st2;
   st2.setDryRun(true);
   st2.configure(L"mpv.exe", L"yt-dlp.exe");
-  App again(eng2, st2);
+  App again(eng2, st2, sp);
   again.model.load(saved);
   again.init();
   t.check("app loop: a saved loop comes back with the app", again.model.s.repeat && again.session.loop());
@@ -940,7 +1082,7 @@ void testAppLoop(TestLog& t) {
   Stream st3;
   st3.setDryRun(true);
   st3.configure(L"mpv.exe", L"yt-dlp.exe");
-  App fresh(eng3, st3);
+  App fresh(eng3, st3, sp);
   fresh.init();
   t.check("app loop: a first start has it off", !fresh.model.s.repeat && !fresh.session.loop());
 
@@ -960,6 +1102,585 @@ void testAppLoop(TestLog& t) {
   again.setLoop(true);
   again.applyLaunch(none);
   t.check("app loop: a launch that says nothing about it keeps the setting", again.model.s.repeat);
+}
+
+// The number of sets through the controller and the saved file, and what happens when a plan has ended: play starts it
+// again, also while it still fades out, and picking another plan then keeps the sound.
+void testAppSets(TestLog& t) {
+  Engine eng;
+  eng.start(false, 48000);
+  Stream st;
+  st.setDryRun(true);
+  st.configure(L"mpv.exe", L"yt-dlp.exe");
+  Spotify sp;
+  sp.setInline(true);
+  App app(eng, st, sp);
+  int64_t clock = 5000000;
+  time_t today = 1760000000;
+  app.session.setClock([&] { return clock; });
+  app.model.nowFn = [&] { return today; };
+  int saves = 0, changes = 0;
+  app.onSave = [&] { saves++; };
+  app.onChange = [&] { changes++; };
+  app.init();
+  auto adv = [&](int64_t ms) { clock += ms; app.tick(); };
+  const int64_t MIN = 60000;
+
+  // the picker's choices
+  t.check("app sets: no loop and no count to begin with", app.setsChoice() == 1 && !app.model.s.repeat && app.model.s.sets == SETS_FOREVER);
+  app.selectScene("focus");
+  saves = 0;
+  app.chooseSets(4);
+  t.check("app sets: choosing four turns the loop on with four sets, in the model and the session, and saves",
+          app.model.s.repeat && app.model.s.sets == 4 && app.session.loop() && app.session.sets() == 4 && app.setsChoice() == 4 && saves > 0);
+  app.chooseSets(1);
+  t.check("app sets: choosing one turns the loop off and keeps the count for later", !app.model.s.repeat && !app.session.loop() && app.model.s.sets == 4 && app.setsChoice() == 1);
+  app.toggleLoop();
+  t.check("app sets: the toggle brings it back with that count", app.model.s.repeat && app.model.s.sets == 4 && app.session.sets() == 4 && app.setsChoice() == 4);
+  app.chooseSets(SETS_FOREVER);
+  t.check("app sets: until stopped is the loop on with no count", app.model.s.repeat && app.model.s.sets == SETS_FOREVER && app.session.sets() == SETS_FOREVER && app.setsChoice() == SETS_FOREVER);
+  app.chooseSets(500);
+  t.check("app sets: a number past the most is held at it", app.model.s.sets == SETS_MAX);
+  app.chooseSets(3);
+
+  // three sets of 25·5 in the app: the plan ends after the third and fades out like any other
+  app.selectPlan("p25");
+  adv(1000);
+  adv(115 * MIN + 5 * MIN);
+  t.check("app sets: after the first set the second begins and the sound goes on", app.session.snapshot().lap == 1 && app.running && !app.closing && !app.session.done());
+  adv(120 * MIN);
+  adv(115 * MIN);
+  t.check("app sets: the last round of the third set ends the plan and starts the fade-out", app.session.done() && app.closing && app.session.snapshot().lap == 2);
+
+  // after the end: play starts it again, even while the sound is still fading
+  app.taskSet(L"Finished one");
+  app.taskTick();
+  const int64_t t0 = wallMs();
+  app.closeTick(t0);
+  app.closeTick(t0 + 1500);
+  t.check("app sets: the fade is under way", app.closing && app.running && app.lastFade < 0.9, fmt("%.2f", app.lastFade));
+  app.togglePlay();
+  SessionSnap s = app.session.snapshot();
+  t.check("app sets: play during the fade starts the plan again instead of pausing it", app.running && !app.closing && !app.session.done() && app.session.running() && s.lap == 0 && s.round == 1 && app.lastFade == 1);
+  t.check("app sets: with the loop and its count as they were", app.model.s.repeat && s.sets == 3);
+  t.check("app sets: it is a proper start: a task that was finished is cleared", app.model.s.task.empty());
+  t.check("app sets: and the fade-out does nothing more", app.closeTick(t0 + 9000) && app.running);
+
+  // the same once the fade is over
+  adv(120 * MIN * 2 + 115 * MIN);
+  t.check("app sets: finished again", app.session.done() && app.closing);
+  bool over = false;
+  for (int i = 0; i < 60 && !over; i++) over = app.closeTick(wallMs() + 5000 + i * 120);
+  t.check("app sets: the fade ends by stopping everything", over && !app.running && app.session.done());
+  app.togglePlay();
+  t.check("app sets: play after the fade starts it again from the first round", app.running && !app.session.done() && app.session.snapshot().lap == 0 && app.session.snapshot().round == 1);
+
+  // picking another plan while the sound fades keeps the new plan going
+  adv(1000);
+  adv(3 * 120 * MIN);
+  t.check("app sets: finished once more", app.session.done() && app.closing);
+  app.selectPlan("p50");
+  t.check("app sets: another plan during the fade-out starts and the fade is cancelled", app.running && !app.closing && app.lastFade == 1 && app.session.planId() == "p50" && !app.session.done() && app.session.running());
+  t.check("app sets: so the fade-out has nothing to stop", app.closeTick(wallMs() + 20000) && app.running);
+  adv(530 * MIN);  // three sets of 50·10: 3 * 170 minutes and two breaks of ten
+  t.check("app sets: and once more", app.session.done() && app.closing);
+  app.selectScene("read");
+  t.check("app sets: another scene during the fade-out keeps playing too", app.running && !app.closing && app.lastFade == 1 && !app.session.done());
+  app.selectScene("focus");
+  app.setLoop(false);
+  app.selectPlan("p25");
+  app.presetAdd();   // a preset that remembers 25·5
+  app.selectPlan("p50");
+  adv(171 * MIN);
+  t.check("app sets: a preset on another plan than its own, finished", app.model.scene().custom && app.model.planDirty() && app.session.done() && app.closing);
+  app.resetMix();
+  t.check("app sets: putting the preset back to its plan during the fade-out starts that plan and keeps the sound",
+          app.session.planId() == "p25" && app.running && !app.closing && app.lastFade == 1 && !app.session.done() && app.session.running());
+  app.setLoop(true);
+
+  // the saved file keeps both
+  app.chooseSets(5);
+  const string saved = app.model.serialize();
+  Engine eng2;
+  eng2.start(false, 48000);
+  Stream st2;
+  st2.setDryRun(true);
+  st2.configure(L"mpv.exe", L"yt-dlp.exe");
+  App again(eng2, st2, sp);
+  again.model.load(saved);
+  again.init();
+  t.check("app sets: a saved count comes back with the app", again.model.s.repeat && again.model.s.sets == 5 && again.session.loop() && again.session.sets() == 5 && again.setsChoice() == 5);
+
+  // launch options
+  Launch four = parseLaunch({L"--scene", L"focus", L"--plan", L"p25", L"--loop=4", L"--play"});
+  t.check("app sets: --loop=4 is read as four sets", four.loop == 1 && four.sets == 4 && four.scene == "focus" && four.play);
+  t.check("app sets: --loop alone goes on until stopped", parseLaunch({L"--loop"}).loop == 1 && parseLaunch({L"--loop"}).sets == SETS_FOREVER);
+  t.check("app sets: --loop=1 is no loop", parseLaunch({L"--loop=1"}).loop == 0);
+  t.check("app sets: --loop=0 and nonsense after it mean until stopped", parseLaunch({L"--loop=0"}).loop == 1 && parseLaunch({L"--loop=0"}).sets == SETS_FOREVER && parseLaunch({L"--loop=abc"}).loop == 1 && parseLaunch({L"--loop=abc"}).sets == SETS_FOREVER);
+  t.check("app sets: a count past the most is held at it", parseLaunch({L"--loop=500"}).sets == SETS_MAX);
+  again.chooseSets(1);
+  again.applyLaunch(four);
+  t.check("app sets: a launch with --loop=4 turns the loop on with four sets and plays", again.model.s.repeat && again.model.s.sets == 4 && again.session.sets() == 4 && again.running && again.session.planId() == "p25");
+  again.applyLaunch(parseLaunch({L"--loop"}));
+  t.check("app sets: a launch with plain --loop replaces the count with none", again.model.s.repeat && again.model.s.sets == SETS_FOREVER);
+  again.applyLaunch(parseLaunch({L"--loop=1"}));
+  t.check("app sets: and --loop=1 turns it off", !again.model.s.repeat);
+  t.check("app sets: the window was told", changes > 5, std::to_string(changes));
+}
+
+// How the number of sets is kept in the file.
+void testSetsModel(TestLog& t) {
+  Model m;
+  t.check("model sets: none to begin with", m.s.sets == SETS_FOREVER && Model().s.sets == SETS_FOREVER);
+  m.s.repeat = true;
+  m.s.sets = 4;
+  const string json = m.serialize();
+  Model back;
+  back.load(json);
+  t.check("model sets: the count survives", back.s.sets == 4 && back.s.repeat && json.find("\"sets\"") != string::npos);
+  t.check("model sets: and the state round-trips with it", back.serialize() == json);
+  State st;
+  t.check("model sets: a file from before the count means until stopped", Model::parse("{\"repeat\":true}", st) && st.repeat && st.sets == SETS_FOREVER);
+  t.check("model sets: one is not a count", Model::parse("{\"repeat\":true,\"sets\":1}", st) && st.sets == SETS_FOREVER);
+  t.check("model sets: nor is zero or a negative number", Model::parse("{\"sets\":0}", st) && st.sets == SETS_FOREVER && Model::parse("{\"sets\":-3}", st) && st.sets == SETS_FOREVER);
+  t.check("model sets: a number that is not whole is rounded", Model::parse("{\"sets\":3.6}", st) && st.sets == 4);
+  t.check("model sets: a huge one is held at the most", Model::parse("{\"sets\":100000}", st) && st.sets == SETS_MAX && Model::parse("{\"sets\":1e30}", st) && st.sets == SETS_MAX);
+  t.check("model sets: a value that is not a number means until stopped", Model::parse("{\"sets\":\"4\"}", st) && st.sets == SETS_FOREVER && Model::parse("{\"sets\":null}", st) && st.sets == SETS_FOREVER &&
+                                                                       Model::parse("{\"sets\":[4]}", st) && st.sets == SETS_FOREVER);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The task: ONE for the whole plan, up to four steps under it. The data first, then the file, then when it clears.
+// ---------------------------------------------------------------------------------------------------
+
+void testTaskModel(TestLog& t) {
+  t.check("task text: white space becomes single spaces and the ends are trimmed", cleanTaskText(L"  Read \t chapter\n 3  ", 60) == L"Read chapter 3");
+  t.check("task text: a control character is a space too", cleanTaskText(L"a\x01" L"b", 60) == L"a b");
+  t.check("task text: nothing but white space is nothing", cleanTaskText(L" \t\n ", 60).empty());
+  t.check("task text: it is cut at the limit, without a space left at the end", cleanTaskText(wstring(70, L'x'), 60).size() == 60 && cleanTaskText(L"abcde fghij", 6) == L"abcde");
+  t.check("task text: an emoji is not cut in half", cleanTaskText(L"ab\U0001F600", 3) == L"ab");
+
+  Model m;
+  t.check("task: a new model has no task", m.s.task.empty() && !m.s.task.finished() && m.s.task.steps.empty());
+  t.check("task: one task, and four steps at most", TASK_STEPS == 4);
+
+  // the task
+  t.check("task: it needs some text", !m.setTask(L"   ") && m.s.task.empty());
+  t.check("task: the text is cleaned and kept", m.setTask(L"  Chapter   3 ") && m.s.task.text == L"Chapter 3");
+  t.check("task: the same text again changes nothing", !m.setTask(L"Chapter 3"));
+  t.check("task: other text replaces it, and an empty one leaves it", m.setTask(L"Chapter 4") && !m.setTask(L" ") && m.s.task.text == L"Chapter 4");
+  t.check("task: it is cut at 60 characters", m.setTask(wstring(100, L'y')) && m.s.task.text.size() == TASK_TEXT);
+  m.setTask(L"Chapter 4");
+
+  // steps
+  Model e;
+  t.check("task: a step needs a task", !e.addStep(L"Question 1") && e.s.task.steps.empty());
+  t.check("task: a step is added", m.addStep(L"Read the examples") && m.s.task.steps.size() == 1 && m.s.task.steps[0].text == L"Read the examples");
+  t.check("task: an empty step is not", !m.addStep(L"  \t "));
+  t.check("task: the steps keep their order", m.addStep(L"Question 1") && m.addStep(L"Question 2") && m.addStep(L"Check") && m.s.task.steps[2].text == L"Question 2");
+  t.check("task: four steps at most", m.s.task.steps.size() == 4 && !m.addStep(L"One more"));
+  t.check("task: a step can be reworded, an empty one leaves it", m.setStep(1, L"Question 1 to 5") && !m.setStep(1, L"") && !m.setStep(1, L"Question 1 to 5") && m.s.task.steps[1].text == L"Question 1 to 5");
+  t.check("task: a step that is not there is refused", !m.setStep(4, L"x") && !m.setStep(-1, L"x") && !m.removeStep(4) && !m.removeStep(-1) && !m.tickStep(4) && !m.tickStep(-2));
+  Model long_;
+  long_.setTask(L"Another");
+  t.check("task: a step is cut at 48 characters", long_.addStep(wstring(80, L's')) && long_.s.task.steps[0].text.size() == STEP_TEXT);
+
+  // ticking: the steps decide when there are some
+  t.check("task: not finished while nothing is ticked", !m.s.task.finished() && m.s.task.stepsDone() == 0);
+  t.check("task: ticking a step", m.tickStep(0) && m.s.task.steps[0].done && m.s.task.stepsDone() == 1 && !m.s.task.finished());
+  t.check("task: ticking the task ticks the rest of its steps", m.tickTask() && m.s.task.stepsDone() == 4 && m.s.task.finished());
+  t.check("task: ticking it again unticks them all", m.tickTask() && m.s.task.stepsDone() == 0 && !m.s.task.finished());
+  m.tickStep(0);
+  m.tickStep(1);
+  m.tickStep(2);
+  t.check("task: the last step ticked finishes the task", !m.s.task.finished() && m.tickStep(3) && m.s.task.finished());
+  t.check("task: unticking one takes that back", m.tickStep(2) && !m.s.task.finished());
+  m.s.task.steps[2].done = true;
+  t.check("task: removing a step can finish the task", m.removeStep(0) && m.s.task.steps.size() == 3 && m.s.task.finished());
+  t.check("task: a new step reopens it", m.addStep(L"Another") && !m.s.task.finished());
+  Model alone;
+  alone.setTask(L"Email Sam");
+  t.check("task: without steps the task has its own tick", !alone.s.task.finished() && alone.tickTask() && alone.s.task.finished() && alone.tickTask() && !alone.s.task.finished());
+  alone.tickTask();
+  alone.addStep(L"Find the address");
+  t.check("task: giving it a first step hands the decision to the steps", !alone.s.task.finished() && !alone.s.task.done);
+  alone.removeStep(0);
+  t.check("task: taking the last step away leaves it unfinished", !alone.s.task.finished() && alone.s.task.steps.empty());
+  t.check("task: with no task there is nothing to tick", !Model().tickTask());
+
+  // taking the task out and putting it back
+  const Task before = m.s.task;
+  const Task taken = m.takeTask();
+  t.check("task: taking it empties it and hands it back whole", m.s.task.empty() && taken.text == before.text && taken.steps.size() == before.steps.size());
+  t.check("task: it goes back when there is none", m.putTask(taken) && m.s.task.text == before.text && m.s.task.steps.size() == before.steps.size());
+  t.check("task: but never over another, and nothing is put back", !m.putTask(taken) && !Model().putTask(Task()));
+  t.check("task: taking when there is none gives nothing", Model().takeTask().empty());
+
+  // clearing a finished one
+  Model c;
+  t.check("task: with no task there is nothing to clear", !c.clearFinishedTask());
+  c.setTask(L"A");
+  t.check("task: one that is not finished stays", !c.clearFinishedTask() && c.s.task.text == L"A");
+  c.tickTask();
+  t.check("task: a finished one is cleared", c.clearFinishedTask() && c.s.task.empty());
+  c.setTask(L"B");
+  c.addStep(L"b1");
+  c.addStep(L"b2");
+  c.tickStep(0);
+  t.check("task: with a step still open it stays", !c.clearFinishedTask() && c.s.task.steps.size() == 2);
+  c.tickStep(1);
+  t.check("task: with every step ticked it is finished, and goes", c.clearFinishedTask() && c.s.task.empty());
+  t.check("task: and then there is nothing left to clear", !c.clearFinishedTask());
+
+  // saving
+  Model a;
+  a.setTask(L"Chapter 3 problems");
+  a.addStep(L"Read the examples");
+  a.addStep(L"Question “1” to 5 — the “hard” ones");
+  a.tickStep(0);
+  const string saved = a.serialize();
+  Model b;
+  b.load(saved);
+  bool same = a.s.task.text == b.s.task.text && a.s.task.done == b.s.task.done && a.s.task.steps.size() == b.s.task.steps.size();
+  for (size_t k = 0; k < a.s.task.steps.size() && k < b.s.task.steps.size(); k++) same = same && a.s.task.steps[k].text == b.s.task.steps[k].text && a.s.task.steps[k].done == b.s.task.steps[k].done;
+  t.check("task: it comes back from the file just as it was, ticks and all", same && b.s.task.steps.size() == 2 && b.s.task.stepsDone() == 1);
+  t.check("task: saved as one entry, and the state round-trips", saved.find("\"task\"") != string::npos && saved.find("\"tasks\"") == string::npos && b.serialize() == saved);
+  Model d;
+  d.setTask(L"Email Sam");
+  d.tickTask();
+  Model d2;
+  d2.load(d.serialize());
+  t.check("task: a task without steps keeps its tick", d2.s.task.text == L"Email Sam" && d2.s.task.finished());
+  Model none;
+  none.load(none.serialize());
+  t.check("task: no task is saved as an empty entry and comes back as none", none.s.task.empty());
+
+  // a damaged or hand-edited file costs nothing else
+  State s;
+  t.check("task: a file without one gives none", Model::parse("{\"master\": 41}", s) && s.master == 41 && s.task.empty());
+  t.check("task: a task of the wrong type is ignored", Model::parse("{\"master\": 42, \"task\": 5}", s) && s.master == 42 && s.task.empty());
+  t.check("task: text that is not text makes an empty one", Model::parse("{\"task\": {\"t\": 123}}", s) && s.task.empty());
+  t.check("task: a title without steps stays", Model::parse("{\"task\": {\"t\": \"A\", \"s\": \"nope\"}}", s) && s.task.text == L"A" && s.task.steps.empty() && !s.task.done);
+  const string odd = "{\"master\": 43, \"task\": {\"t\": \"  B  \", \"d\": true, \"s\": [{\"t\": \"s1\"}, {\"t\": \"\"}, {\"d\": true}, 7, {\"t\": \"s2\", \"d\": true}, {\"t\": \"s3\"}, {\"t\": \"s4\"}, {\"t\": \"s5\"}]}}";
+  t.check("task: odd steps are dropped one by one", Model::parse(odd, s) && s.master == 43 && s.task.text == L"B");
+  t.check("task: steps without text are dropped and four are the most", s.task.steps.size() == 4 && s.task.steps[0].text == L"s1" && s.task.steps[1].text == L"s2" && s.task.steps[1].done && s.task.steps[3].text == L"s4");
+  t.check("task: with steps, the task's own tick is ignored", !s.task.done && !s.task.finished());
+  Model::parse("{\"task\": {\"t\": \"" + string(200, 'x') + "\", \"s\": [{\"t\": \"" + string(200, 'y') + "\"}]}}", s);
+  t.check("task: long text in a file is cut to the limits", s.task.text.size() == TASK_TEXT && s.task.steps.size() == 1 && s.task.steps[0].text.size() == STEP_TEXT);
+
+  // a file from when every round had a task of its own (an array of four): it is folded into the one
+  State f;
+  t.check("task: that file with every round empty, as the first version wrote it, gives no task", Model::parse("{\"master\": 44, \"tasks\": [{}, {}, {}, {}]}", f) && f.master == 44 && f.task.empty());
+  t.check("task: the first task in it becomes the task, with its steps and ticks",
+          Model::parse("{\"tasks\": [{}, {\"t\": \"Essay\", \"s\": [{\"t\": \"Outline\", \"d\": true}]}, {}, {}]}", f) && f.task.text == L"Essay" && f.task.steps.size() == 1 && f.task.steps[0].text == L"Outline" && f.task.steps[0].done);
+  t.check("task: the others follow it as steps, ticked when they were finished",
+          Model::parse("{\"tasks\": [{\"t\": \"One\"}, {\"t\": \"Two\", \"d\": true}, {\"t\": \"Three\", \"s\": [{\"t\": \"x\"}]}, {}]}", f) && f.task.text == L"One" && f.task.steps.size() == 2 &&
+              f.task.steps[0].text == L"Two" && f.task.steps[0].done && f.task.steps[1].text == L"Three" && !f.task.steps[1].done && !f.task.done);
+  t.check("task: a first task that was ticked is not finished once the others are steps under it",
+          Model::parse("{\"tasks\": [{\"t\": \"One\", \"d\": true}, {\"t\": \"Two\"}]}", f) && f.task.text == L"One" && !f.task.done && f.task.steps.size() == 1 && !f.task.finished());
+  t.check("task: as many as fit: four steps in all",
+          Model::parse("{\"tasks\": [{\"t\": \"One\", \"s\": [{\"t\": \"a\"}, {\"t\": \"b\"}, {\"t\": \"c\"}]}, {\"t\": \"Two\"}, {\"t\": \"Three\"}, {\"t\": \"Four\"}]}", f) && f.task.steps.size() == 4 && f.task.steps[2].text == L"c" && f.task.steps[3].text == L"Two");
+  t.check("task: a step of a long title is cut to a step's length", Model::parse("{\"tasks\": [{\"t\": \"One\"}, {\"t\": \"" + string(60, 'q') + "\"}]}", f) && f.task.steps.size() == 1 && f.task.steps[0].text.size() == STEP_TEXT);
+  t.check("task: the new entry wins over the old one", Model::parse("{\"task\": {\"t\": \"New\"}, \"tasks\": [{\"t\": \"Old\"}]}", f) && f.task.text == L"New" && f.task.steps.empty());
+  t.check("task: the old entry of the wrong type gives none", Model::parse("{\"tasks\": 5}", f) && f.task.empty() && Model::parse("{\"tasks\": [5, null, \"x\"]}", f) && f.task.empty());
+  Model old;
+  old.load("{\"scene\": \"read\", \"tasks\": [{\"t\": \"One\"}]}");
+  const string again = old.serialize();
+  t.check("task: loaded and saved again it is in the new shape", old.s.task.text == L"One" && again.find("\"task\"") != string::npos && again.find("\"tasks\"") == string::npos);
+}
+
+// The day runs from 4 am to 4 am, so a night's work stays with the evening it began; and moving minutes between days.
+void testDayBoundary(TestLog& t) {
+  // local times, so the checks hold in any time zone
+  auto at = [](int y, int mo, int d, int h, int mi) {
+    tm l = {};
+    l.tm_year = y - 1900;
+    l.tm_mon = mo - 1;
+    l.tm_mday = d;
+    l.tm_hour = h;
+    l.tm_min = mi;
+    l.tm_isdst = -1;
+    return mktime(&l);
+  };
+  Model m;
+  time_t now = at(2026, 11, 7, 22, 0);
+  m.nowFn = [&] { return now; };
+  t.check("day: it starts at 4 am", DAY_STARTS_AT == 4);
+  t.check("day: 11 pm is that day", m.dayKey(at(2026, 11, 7, 23, 59)) == "2026-11-07");
+  t.check("day: and midnight is not the end of it", m.dayKey(at(2026, 11, 8, 0, 0)) == "2026-11-07" && m.dayKey(at(2026, 11, 8, 1, 30)) == "2026-11-07");
+  t.check("day: 3:59 am is still the evening before", m.dayKey(at(2026, 11, 8, 3, 59)) == "2026-11-07");
+  t.check("day: 4:00 am starts the new one", m.dayKey(at(2026, 11, 8, 4, 0)) == "2026-11-08" && m.dayKey(at(2026, 11, 8, 12, 0)) == "2026-11-08");
+  t.check("day: the new one runs to 3:59 the next morning", m.dayKey(at(2026, 11, 9, 3, 59)) == "2026-11-08" && m.dayKey(at(2026, 11, 9, 4, 0)) == "2026-11-09");
+  t.check("day: the month and the year turn over at 4 am too", m.dayKey(at(2026, 12, 1, 3, 0)) == "2026-11-30" && m.dayKey(at(2027, 1, 1, 3, 59)) == "2026-12-31" && m.dayKey(at(2027, 1, 1, 4, 0)) == "2027-01-01");
+
+  // an evening that runs into the night
+  m.addFocus(10 * 60000);  // 22:00
+  now = at(2026, 11, 7, 23, 50);
+  m.addFocus(10 * 60000);
+  now = at(2026, 11, 8, 0, 30);  // after midnight
+  m.addFocus(30 * 60000);
+  now = at(2026, 11, 8, 3, 59);
+  m.addFocus(5 * 60000);
+  t.check("day: minutes after midnight go on counting for the same day", std::fabs(m.todayMinutes() - 55) < 1e-6 && m.s.log.size() == 1, fmt("%.2f minutes in %d days", m.todayMinutes(), (int)m.s.log.size()));
+  now = at(2026, 11, 8, 4, 0);
+  t.check("day: at 4 am the corner starts again from nothing", m.todayMinutes() == 0 && std::fabs(m.week()[5] - 55) < 1e-6 && m.week()[6] == 0);
+  m.addFocus(15 * 60000);
+  t.check("day: and the new day counts from there", std::fabs(m.todayMinutes() - 15) < 1e-6 && m.s.log.size() == 2);
+  t.check("day: the week lists the night with the evening before it", std::fabs(m.week()[5] - 55) < 1e-6 && std::fabs(m.week()[6] - 15) < 1e-6 && m.week()[0] == 0);
+  now = at(2026, 11, 9, 2, 0);
+  t.check("day: next night, before 4 am, today is still the 8th", std::fabs(m.todayMinutes() - 15) < 1e-6 && std::fabs(m.week()[6] - 15) < 1e-6);
+
+  // moving minutes between days
+  State s;
+  s.log = {{"2026-11-07", 159.134}, {"2026-11-08", 81.85}};
+  const string note = "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": 80.4}]}";
+  const double moved = applyLogMoves(s, note);
+  t.check("log moves: the minutes leave one day and arrive in the other", std::fabs(moved - 80.4) < 1e-9 && std::fabs(s.log["2026-11-07"] - 239.534) < 1e-9 && std::fabs(s.log["2026-11-08"] - 1.45) < 1e-9,
+          fmt("moved %.3f, %.3f and %.3f", moved, s.log["2026-11-07"], s.log["2026-11-08"]));
+  State few;
+  few.log = {{"2026-11-08", 10}};
+  t.check("log moves: never more than the day has, and an empty day is gone", std::fabs(applyLogMoves(few, "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": 50}]}") - 10) < 1e-9 && few.log.size() == 1 && few.log.count("2026-11-07") && std::fabs(few.log["2026-11-07"] - 10) < 1e-9);
+  State many;
+  many.log = {{"2026-11-08", 30}};
+  t.check("log moves: a note can have several, applied in order",
+          std::fabs(applyLogMoves(many, "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": 20}, {\"from\": \"2026-11-07\", \"to\": \"2026-11-06\", \"minutes\": 5}]}") - 25) < 1e-9 &&
+              std::fabs(many.log["2026-11-08"] - 10) < 1e-9 && std::fabs(many.log["2026-11-07"] - 15) < 1e-9 && std::fabs(many.log["2026-11-06"] - 5) < 1e-9);
+  State odd;
+  odd.log = {{"2026-11-08", 30}};
+  const char* skipped[] = {
+      "{\"moves\": [{\"from\": \"2026-11-01\", \"to\": \"2026-11-07\", \"minutes\": 5}]}",   // a day that is not in the log
+      "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-08\", \"minutes\": 5}]}",   // to itself
+      "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": -5}]}",  // backwards
+      "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": 0}]}",
+      "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": \"5\"}]}",
+      "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-1-7\", \"minutes\": 5}]}",       // not a day
+      "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"yesterday\", \"minutes\": 5}]}",
+      "{\"moves\": [{\"from\": \"2026-11-08\", \"minutes\": 5}]}",
+      "{\"moves\": [5, null, [], \"x\"]}",
+      "{\"moves\": 5}",
+      "{\"minutes\": 5}",
+      "[1, 2]",
+      "not json at all",
+      "",
+  };
+  bool untouched = true;
+  for (const char* n : skipped) untouched = untouched && applyLogMoves(odd, n) == 0 && odd.log.size() == 1 && std::fabs(odd.log["2026-11-08"] - 30) < 1e-9;
+  t.check("log moves: anything that makes no sense is skipped and moves nothing", untouched);
+  State bad;
+  bad.log = {{"2026-11-08", 30}};
+  t.check("log moves: a good entry still counts beside bad ones", std::fabs(applyLogMoves(bad, "{\"moves\": [7, {\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": 12}, {\"from\": 1}]}") - 12) < 1e-9 && std::fabs(bad.log["2026-11-07"] - 12) < 1e-9);
+  State sixty;
+  for (int i = 0; i < 60; i++) sixty.log[fmt("2026-%02d-%02d", 1 + i / 28, 1 + i % 28)] = 1;
+  sixty.log["2026-11-08"] = 5;
+  applyLogMoves(sixty, "{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": 2}]}");
+  t.check("log moves: the log stays at 60 days at the most", sixty.log.size() <= 60, std::to_string(sixty.log.size()));
+
+  // the note in the data folder (here the tests' scratch folder): used once, and then gone
+  const wstring notePath = appDataDir() + L"\\log-moves.json";
+  auto leave = [&](const string& text) {
+    if (FILE* f = _wfopen(notePath.c_str(), L"wb")) { fwrite(text.data(), 1, text.size(), f); fclose(f); }
+  };
+  auto there = [&] { return GetFileAttributesW(notePath.c_str()) != INVALID_FILE_ATTRIBUTES; };
+  State fromNote;
+  fromNote.log = {{"2026-11-08", 30}};
+  t.check("log note: no note, nothing moves", !there() && applyLogNote(fromNote, notePath) == 0 && fromNote.log.size() == 1);
+  leave("{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": 12.5}]}");
+  t.check("log note: it is applied", there() && std::fabs(applyLogNote(fromNote, notePath) - 12.5) < 1e-9 && std::fabs(fromNote.log["2026-11-08"] - 17.5) < 1e-9 && std::fabs(fromNote.log["2026-11-07"] - 12.5) < 1e-9);
+  t.check("log note: and then it is gone, so a second start moves nothing more", !there() && applyLogNote(fromNote, notePath) == 0 && std::fabs(fromNote.log["2026-11-08"] - 17.5) < 1e-9);
+  leave("this is not json");
+  t.check("log note: a note that makes no sense is removed and moves nothing", applyLogNote(fromNote, notePath) == 0 && !there() && fromNote.log.size() == 2);
+  leave("{\"moves\": [{\"from\": \"2026-11-08\", \"to\": \"2026-11-07\", \"minutes\": 5}]}");
+  SetFileAttributesW(notePath.c_str(), FILE_ATTRIBUTE_READONLY);  // cannot be deleted, so it must not be used either
+  t.check("log note: one that cannot be removed is not applied", applyLogNote(fromNote, notePath) == 0 && there() && std::fabs(fromNote.log["2026-11-08"] - 17.5) < 1e-9);
+  SetFileAttributesW(notePath.c_str(), FILE_ATTRIBUTE_NORMAL);
+  DeleteFileW(notePath.c_str());
+}
+
+// The task through the controller: the same one through every round, break and plan, and a finished one makes room when the
+// plan starts again.
+void testAppTasks(TestLog& t) {
+  Engine eng;
+  eng.start(false, 48000);
+  Stream st;
+  st.setDryRun(true);
+  st.configure(L"mpv.exe", L"yt-dlp.exe");
+  Spotify sp;
+  sp.setInline(true);
+  App app(eng, st, sp);
+  int64_t clock = 5000000;
+  time_t today = 1760000000;
+  app.session.setClock([&] { return clock; });
+  app.model.nowFn = [&] { return today; };
+  int saves = 0, changes = 0;
+  app.onSave = [&] { saves++; };
+  app.onChange = [&] { changes++; };
+  app.init();
+  auto adv = [&](int64_t ms) { clock += ms; app.tick(); };
+  const int64_t MIN = 60000;
+
+  t.check("app task: Focus has a task and there is none to begin with", app.tasksOn() && app.model.s.task.empty());
+  for (const char* id : {"focus", "sprint", "read", "create", "mask", "white"}) {
+    app.selectScene(id);
+    app.stopAll();
+    t.check(string("app task: ") + id + " has the task", app.tasksOn());
+  }
+  for (const char* id : {"calm", "sleep"}) {
+    app.selectScene(id);
+    app.stopAll();
+    t.check(string("app task: ") + id + " has none", !app.tasksOn());
+  }
+  app.selectScene("focus");
+  app.stopAll();
+
+  // one task for all the rounds: it is the same through the seven phases of 25·5, and when the plan is over
+  app.selectPlan("p25");
+  app.taskSet(L"Chapter 3");
+  app.taskAddStep(L"Read");
+  app.startAll();
+  adv(500);
+  bool kept = true;
+  int seen = 0;
+  for (int span : {25, 5, 25, 5, 25, 5, 25}) {  // F B F B F B F
+    kept = kept && app.model.s.task.text == L"Chapter 3" && app.model.s.task.steps.size() == 1;
+    seen++;
+    adv((int64_t)span * MIN);
+  }
+  t.check("app task: the same task in every round and every break of 25·5", kept && seen == 7 && app.session.done(), fmt("%d phases, done %d", seen, app.session.done()));
+  t.check("app task: and when the plan is over", app.model.s.task.text == L"Chapter 3" && app.model.s.task.steps.size() == 1);
+  app.stopAll();
+
+  // and the same on every plan and scene
+  for (const char* plan : {"p50", "free", "p25"}) {
+    app.selectPlan(plan);
+    t.check(string("app task: the same task on ") + plan, app.model.s.task.text == L"Chapter 3" && app.model.s.task.steps.size() == 1);
+  }
+  app.selectScene("sprint");
+  app.stopAll();
+  t.check("app task: and on Sprint, with its own plan", app.session.planId() == "p15" && app.model.s.task.text == L"Chapter 3");
+  app.selectScene("calm");
+  app.stopAll();
+  t.check("app task: Calm does not show it but keeps it for the way back", !app.tasksOn() && app.model.s.task.text == L"Chapter 3");
+  app.selectScene("focus");
+  app.stopAll();
+  app.selectPlan("p25");
+
+  // the changes reach the window and the file
+  app.model.s.task = Task();
+  saves = changes = 0;
+  app.taskSet(L"Chapter 3");
+  t.check("app task: a new task is saved and shown", app.model.s.task.text == L"Chapter 3" && saves == 1 && changes >= 1);
+  app.taskAddStep(L"Read");
+  app.taskAddStep(L"Write");
+  app.taskTickStep(0);
+  app.taskSetStep(1, L"Write up");
+  t.check("app task: so are its steps", app.model.s.task.steps.size() == 2 && app.model.s.task.stepsDone() == 1 && app.model.s.task.steps[1].text == L"Write up" && saves == 5);
+  saves = 0;
+  app.taskSet(L"Chapter 3");
+  app.taskAddStep(L"");
+  app.taskTickStep(9);
+  app.taskRemoveStep(9);
+  t.check("app task: nothing changed, nothing saved", saves == 0);
+  app.taskTick();
+  t.check("app task: ticking the task finishes it", app.model.s.task.finished() && saves == 1);
+  app.taskTick();
+  app.taskRemoveStep(1);
+  t.check("app task: and a step can go", app.model.s.task.steps.size() == 1);
+
+  // deleting with an undo
+  app.taskTickStep(0);
+  app.toast = Toast();
+  app.taskClear();
+  t.check("app task: deleting empties it and offers an undo", app.model.s.task.empty() && app.toast.active() && app.toast.action == L"Undo" && (bool)app.toast.onAction);
+  const auto restore = app.toast.onAction;  // the window calls a copy too: the action clears the toast it lives in
+  restore();
+  t.check("app task: the undo brings it back whole, ticks included", app.model.s.task.text == L"Chapter 3" && app.model.s.task.steps.size() == 1 && app.model.s.task.finished() && !app.toast.active());
+  app.taskClear();
+  auto undo = app.toast.onAction;
+  app.taskSet(L"Something new");
+  undo();
+  t.check("app task: but not over a task written since", app.model.s.task.text == L"Something new" && app.model.s.task.steps.empty());
+  app.taskClear();
+  app.toast = Toast();
+  app.taskClear();
+  t.check("app task: deleting what is not there does nothing", !app.toast.active());
+
+  // a finished task makes room when the plan starts again; one that is not finished waits
+  app.stopAll();
+  app.selectPlan("p25");
+  app.setLoop(false);
+  app.model.s.task = Task();
+  app.taskSet(L"A");
+  app.taskTick();
+  app.startAll();
+  t.check("app task: starting from round 1 clears a task that was finished", app.model.s.task.empty());
+  app.taskSet(L"B");
+  app.stopAll();
+  app.startAll();
+  t.check("app task: and keeps one that was not", app.model.s.task.text == L"B");
+  adv(10 * MIN);
+  app.taskTick();
+  adv(1000);
+  t.check("app task: a task finished during the round stays on screen until the plan starts again", app.model.s.task.finished());
+  app.stopAll();
+  app.startAll();
+  t.check("app task: pausing and playing in the middle of the round does not clear it", app.model.s.task.finished());
+  adv(15 * MIN);
+  t.check("app task: nor does the break after it", app.session.snapshot().kind == PH_BREAK && app.model.s.task.finished());
+  adv(60 * MIN + 5 * MIN);
+  t.check("app task: nor the rounds that follow", app.session.snapshot().index >= 4 && app.model.s.task.finished());
+  adv(MIN * 60);
+  t.check("app task: the plan ends with it still there", app.session.done() && app.model.s.task.finished());
+  app.stopAll();
+  app.startAll();
+  t.check("app task: playing again starts the plan over, and it makes room", app.model.s.task.empty());
+
+  // a set of a looping plan does the same, and a task that is not finished goes on into the next
+  app.stopAll();
+  app.setLoop(true);
+  app.selectPlan("p25");
+  app.model.s.task = Task();
+  app.taskSet(L"Set one");
+  app.startAll();
+  adv(500);
+  app.taskTick();
+  adv(25 * MIN + 5 * MIN + 25 * MIN + 5 * MIN + 25 * MIN + 5 * MIN + 25 * MIN);
+  t.check("app task: through the last round and into the closing break nothing clears", app.session.snapshot().index == 7 && app.model.s.task.finished());
+  adv(5 * MIN);
+  t.check("app task: the next set clears what was finished", app.session.snapshot().lap == 1 && app.model.s.task.empty());
+  app.taskSet(L"Carried");
+  adv(120 * MIN);
+  t.check("app task: one that is not finished goes on into the next set", app.session.snapshot().lap == 2 && app.model.s.task.text == L"Carried");
+  app.setLoop(false);
+  app.stopAll();
+
+  // and what was finished last time is gone when the app starts
+  Model old;
+  old.setTask(L"Yesterday");
+  old.tickTask();
+  Engine eng2;
+  eng2.start(false, 48000);
+  Stream st2;
+  st2.setDryRun(true);
+  st2.configure(L"mpv.exe", L"yt-dlp.exe");
+  App again(eng2, st2, sp);
+  again.model.load(old.serialize());
+  t.check("app task: the file has it before the app is initialised", again.model.s.task.finished());
+  again.init();
+  t.check("app task: starting the app clears a finished task", again.model.s.task.empty());
+  Model left;
+  left.setTask(L"Still to do");
+  left.addStep(L"one");
+  left.addStep(L"two");
+  left.tickStep(0);
+  Engine eng3;
+  eng3.start(false, 48000);
+  Stream st3;
+  st3.setDryRun(true);
+  st3.configure(L"mpv.exe", L"yt-dlp.exe");
+  App again2(eng3, st3, sp);
+  again2.model.load(left.serialize());
+  again2.init();
+  t.check("app task: and keeps one that was not finished, with its ticks", again2.model.s.task.text == L"Still to do" && again2.model.s.task.steps.size() == 2 && again2.model.s.task.stepsDone() == 1 && !again2.model.s.task.finished());
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -1202,15 +1923,18 @@ int runSelfTests(const string& only) {
   if (want("crash")) testCrash(t);
   if (want("thread")) testThread(t);
   if (want("install")) testInstall(t);
-  if (want("model")) testModel(t);
-  if (want("session")) { testSession(t); testSessionLoop(t); }
-  if (want("app")) { testApp(t); testAppLoop(t); }
+  if (want("model")) { testModel(t); testSetsModel(t); testTaskModel(t); testDayBoundary(t); }
+  if (want("session")) { testSession(t); testSessionLoop(t); testSessionSets(t); }
+  if (want("app")) { testApp(t); testAppLoop(t); testAppSets(t); testAppTasks(t); }
   if (want("resolver")) testResolver(t);
-  if (want("ui")) { testUi(t); testLoopUi(t); }
+  if (want("ui")) { testUi(t); testLoopUi(t); testLoopPickerUi(t); testAgainUi(t); testTasksUi(t); }
   if (want("launch")) testLaunch(t);
   if (want("mini")) testMini(t);
   if (want("sprint")) testSprint(t);
   if (want("setup")) { testSetup(t); testSetupUi(t); }
+  if (want("spotify")) { testSpotifyParse(t); testSpotifyPlayer(t); testSpotifyModel(t); testSpotifyApp(t); testSpotifyUi(t); }
+  if (want("resume")) testResume(t);
+  if (want("plugins")) { testPluginsParse(t); testPluginsHost(t); testPluginsApp(t); testPluginsUi(t); testPluginsProcess(t); }
   if (want("dsp")) testDsp(t);
   if (want("audio")) testAudio(t);
   std::printf("\n%s: %d passed, %d failed\n", t.failed ? "FAILED" : "ALL PASSED", t.passed, t.failed);

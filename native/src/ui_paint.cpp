@@ -132,6 +132,16 @@ void Ui::slider(const R& r, int value) {
   g.fillCircle(tx, cy, 7, P.text);
 }
 
+void Ui::vslider(const R& r, int value) {
+  const Palette& P = g.pal;
+  const float v = clampi(value, 0, 100) / 100.f;
+  const float cx = r.cx(), ty = r.b() - 7 - (r.h - 14) * v;
+  g.fillRound({cx - 1.5f, r.y, 3, r.h}, 1.5f, P.line2);
+  g.fillRound({cx - 1.5f, ty, 3, r.b() - ty}, 1.5f, P.accent);
+  g.fillCircle(cx, ty, 9, P.bg);
+  g.fillCircle(cx, ty, 6, P.text);
+}
+
 void Ui::shadow(const R& r, float rad, float alpha) {
   for (int j = 10; j >= 1; j--) {
     const float t = 1 - j / 11.f;
@@ -180,6 +190,7 @@ void Ui::paintTop() {
   slider(L.master, m.s.master);
   iconBtn(L.info, "i-info", hot(H_INFO));
   iconBtn(L.miniBtn, "i-mini", hot(H_MINI));
+  iconBtn(L.plugBtn, "i-plug", hot(H_PLUGS), 20, 1, app.plugins.anyOn());  // lit while a plugin is switched on
   iconBtn(L.keys, "i-keys", hot(H_KEYS));
 }
 
@@ -278,6 +289,15 @@ void Ui::paintRail() {
     const float baseY = s.y + 14 + 24;
     const float w = g.textAt(buf, s.x, baseY, big);
     g.textAt(L"today", s.x + w + 8, baseY, T(12, 400, P.text3));
+    // days in a row, once there are two: a small flame and the count at the right end of the line
+    const int streak = m.streak();
+    if (streak >= 2) {
+      const wstring days = std::to_wstring(streak) + L" days";
+      const TextStyle ds = T(12, 500, P.text2);
+      const float dw = g.measure(days, ds);
+      g.textAt(days, s.r() - dw, baseY, ds);
+      g.icon("i-fire", s.r() - dw - 11, baseY - 5, 15, P.accent);
+    }
     const auto week = m.week();
     double mx = 30;
     for (double v : week) mx = std::max(mx, v);
@@ -310,16 +330,27 @@ void Ui::paintStage() {
       g.text(pd ? pd->label : L"?", L.plan[i], T(12.5f, 500, sel || hv ? P.text : P.text2, TX_CENTER));
     }
   }
-  // the loop button beside the plans: lit when the rounds loop, dim when the plan has none to loop
+  // the loop button beside the plans (it is only there while the plan has rounds): lit when the rounds loop, with the number
+  // of sets inside the icon when there is a count, the way a player's repeat-one button carries its 1
   if (L.loopBtn.w > 0 && visible(L.loopBtn.inset(-3))) {
-    const bool on = m.s.repeat, usable = planHasRounds(m.planId()), hv = hot(H_LOOP);
+    const bool on = m.s.repeat, open = sheet_ == 4, hv = hot(H_LOOP);
+    const bool counted = on && m.s.sets >= 2;
     seg(L.loopBtn);
     const R inner = L.loopBtn.inset(3);
-    if (on) segButton(inner, true, hv);
-    g.icon("i-repeat", inner.cx(), inner.cy(), 18, A(on ? P.accent : (hv ? P.text : P.text2), usable ? 1.f : .45f));
+    if (on || open) segButton(inner, true, hv);
+    const Color ink = on ? P.accent : (hv || open ? P.text : P.text2);
+    g.icon("i-repeat", inner.cx(), inner.cy(), counted ? 22.f : 18.f, ink);
+    if (counted) g.text(std::to_wstring(m.s.sets), {inner.cx() - 10, inner.cy() - 8, 20, 16}, T(9.5f, 700, ink, TX_CENTER));
+  }
+  // with no room for the card, a button opens the Task sheet: lit while there is a task
+  if (L.taskBtn.w > 0 && visible(L.taskBtn.inset(-3))) {
+    const bool has = !m.s.task.empty(), hv = hot(H_TASK, 0);
+    seg(L.taskBtn);
+    g.icon("i-task", L.taskBtn.cx(), L.taskBtn.cy(), 18, has ? P.accent : (hv ? P.text : P.text2));
   }
   paintRing();
   paintTransport();
+  if (L.taskCard.w > 0 && tv.card.w > 0 && sheet_ != 3) paintTask();  // the Task sheet reuses the layout in tv, so the card waits for it to close
   paintSpectrum();
 }
 
@@ -327,13 +358,13 @@ void Ui::paintTransport() {
   if (!visible(L.transport.inset(-3))) return;
   const Palette& P = g.pal;
   const SessionSnap s = app.session.snapshot();
-  auto round = [&](const R& r, const char* icon, bool big, bool hv, bool disabled) {
+  auto round = [&](const R& r, const char* icon, bool big, bool hv, bool disabled, bool line = false) {
     const float a = disabled ? .35f : 1;
     const float cx = r.cx(), cy = r.cy(), rad = r.w / 2;
     if (big) {
       const Color c = hv ? mixColor(P.accent, rgb(0xffffff), .07f) : P.accent;
       g.fillCircle(cx, cy, rad, c);
-      g.icon(icon, cx, cy, r.w < 64 ? 24.f : 26.f, P.accentInk, true);
+      g.icon(icon, cx, cy, r.w < 64 ? 24.f : 26.f, P.accentInk, !line, 2.2f);  // play and pause are solid, the restart arrow a line
     } else {
       g.fillCircle(cx, cy, rad, A(P.panel, a));
       g.strokeCircle(cx, cy, rad - .5f, A(hv ? P.text3 : P.line2, a), 1);
@@ -341,8 +372,44 @@ void Ui::paintTransport() {
     }
   };
   round(L.prev, "i-prev", false, hot(H_PREV), false);
-  round(L.play, app.running ? "i-pause" : "i-play", true, hot(H_PLAY), false);
+  // once the plan is over the big button starts it again, and says so with the restart arrow
+  if (s.done) round(L.play, "i-reset", true, hot(H_PLAY), false, true);
+  else round(L.play, app.running ? "i-pause" : "i-play", true, hot(H_PLAY), false);
   round(L.next, "i-next", false, hot(H_NEXT), !(s.cycle && !s.done));
+}
+
+Ui::RingGeo Ui::ringGeo(const SessionSnap& s) const {
+  RingGeo r;
+  r.ts = (float)clampd(L.ringPx * .24, 44, 80) * (timeText(s).size() > 5 ? .74f : 1.f);  // h:mm:ss is wider
+  r.topH = s.done ? 44.f : r.ts;
+  const float blockH = r.topH + 8 + 16 + 8 + 8;
+  r.y0 = L.ring.cy() - blockH / 2;
+  r.dotsY = r.y0 + r.topH + 8 + 16 + 8 + 4;
+  if (s.done) {
+    // The plan is over, so the ring offers the way to go again: a button under the tick, the word and the dots. The block
+    // grows to make room, and the button is left out when its lower corners would run into the tick marks.
+    const float top = 40, below = s.cycle && s.rounds > 0 ? top + 36 + 3.5f : top + 24;  // the lowest thing above the button
+    const float h = below + 14 + AGAIN_H, rIn = 137 * L.ringPx / 320.f, half = h / 2;
+    if (rIn > half && std::sqrt(rIn * rIn - half * half) >= AGAIN_W / 2 + 6) {
+      r.topH = top;
+      r.y0 = L.ring.cy() - half;
+      r.dotsY = r.y0 + top + 36;
+      r.again = {L.ring.cx() - AGAIN_W / 2, r.y0 + below + 14, AGAIN_W, AGAIN_H};
+    }
+  }
+  return r;
+}
+
+// Under the round dots (or the phase name, where there are no dots) there is room for one line, as wide as the circle
+// inside the tick marks allows at that height.
+R Ui::ringLine(const SessionSnap& s) const {
+  const RingGeo geo = ringGeo(s);
+  if (geo.again.w > 0) return R();  // "Start again" has that place
+  const float k = L.ringPx / 320.f, cy = L.ring.cy();
+  const bool dots = s.cycle && s.rounds > 0;
+  const float mid = geo.dotsY + (dots ? 21 : 8), rIn = 137 * k, dy = mid + 10 - cy;  // dy: its lower edge, where the circle is narrowest
+  const float w = 2 * std::sqrt(std::max(0.f, rIn * rIn - dy * dy)) - 16;
+  return w < 110 ? R() : R{L.ring.cx() - w / 2, mid - 10, w, 20};
 }
 
 void Ui::paintRing() {
@@ -367,12 +434,10 @@ void Ui::paintRing() {
 
   // centre: time, phase, round dots
   const wstring clock = timeText(s);
-  const float ts = (float)clampd(L.ringPx * .24, 44, 80) * (clock.size() > 5 ? .74f : 1.f);  // h:mm:ss is wider
-  const float topH = s.done ? 44.f : ts;
-  const float blockH = topH + 8 + 16 + 8 + 8;
-  const float y0 = cy - blockH / 2;
+  const RingGeo geo = ringGeo(s);
+  const float ts = geo.ts, topH = geo.topH, y0 = geo.y0;
   if (s.done) {
-    g.icon("i-check", cx, y0 + 22, 44, P.ok, false, 1.4f);
+    g.icon("i-check", cx, y0 + topH / 2, topH, P.ok, false, 1.4f);
   } else {
     TextStyle t = T(ts, 200, P.text, TX_CENTER);
     t.tabular = true;
@@ -389,16 +454,147 @@ void Ui::paintRing() {
   if (s.cycle && s.rounds > 0) {
     const int doneCount = s.done ? s.rounds : brk ? s.round : s.round - 1;
     const float total = s.rounds * 7.f + (s.rounds - 1) * 7.f;
-    const float dy = y0 + topH + 8 + 16 + 8 + 4;
+    const float dy = geo.dotsY;
     for (int i = 0; i < s.rounds; i++) {
       const float dx = cx - total / 2 + i * 14 + 3.5f;
       if (i < doneCount) g.fillCircle(dx, dy, 3.5f, P.text3);
       else if (i == s.round - 1 && !brk && !s.done) g.fillCircle(dx, dy, 3.5f, P.accent);
       else g.strokeCircle(dx, dy, 2.75f, P.line2, 1.5f);
     }
-    // looping: a small repeat mark after the dots, so the compact player shows it too
-    if (s.loop) g.icon("i-repeat", cx + total / 2 + 15, dy, 12, A(ink, .85f), false, 2.2f);
+    // looping: a small repeat mark after the dots, so the compact player shows it too, and with a count which set this is
+    if (s.loop) {
+      const float mx = cx + total / 2 + 15;
+      g.icon("i-repeat", mx, dy, 12, A(ink, .85f), false, 2.2f);
+      if (s.sets > 0) g.text(std::to_wstring(s.lap + 1) + L"/" + std::to_wstring(s.sets), {mx + 9, dy - 8, 40, 16}, T(10.5f, 600, A(ink, .85f)));
+    }
   }
+  if (geo.again.w > 0 && visible(geo.again.inset(-3))) paintAgain(geo.again);
+  // the task in one line, unless the card beside the ring has it
+  const R line = L.taskCard.w > 0 || !app.tasksOn() ? R() : ringLine(s);
+  if (line.w > 0 && !app.model.s.task.empty()) {
+    const Task& t = app.model.s.task;
+    const bool fin = t.finished();
+    TextStyle ls = T(12, 500, fin ? P.ok : (hot(H_TASK, 1) ? P.text : P.text2));
+    ls.ellipsis = true;
+    const TextStyle cs = T(11, 500, P.text3);
+    const wstring count = t.steps.empty() ? L"" : std::to_wstring(t.stepsDone()) + L"/" + std::to_wstring(t.steps.size());
+    const wstring& title = t.text;
+    const float countW = count.empty() ? 0.f : g.measure(count, cs) + 6, iconW = fin ? 16.f : 0.f;
+    const float titleW = std::min(g.measure(title, ls), line.w - countW - iconW);
+    const float x = line.cx() - (iconW + titleW + countW) / 2;
+    if (fin) g.icon("i-check", x + 6, line.cy(), 12, P.ok, false, 2.2f);
+    g.text(title, {x + iconW, line.y, titleW + 1, line.h}, ls);
+    if (countW > 0) g.text(count, {x + iconW + titleW + 6, line.y, countW, line.h}, cs);
+  }
+}
+
+// The text of the task, which is the big thing, and of its steps, which are smaller; both grey out and get a line through
+// them once ticked.
+TextStyle Ui::taskStyle(bool title, bool done) const {
+  const Palette& P = g.pal;
+  TextStyle st = title ? T(13.5f, 600, done ? P.text3 : P.text) : T(12.5f, 400, done ? P.text3 : P.text2);
+  st.ellipsis = true;
+  return st;
+}
+
+// The task card beside the ring and the body of the Task sheet: the same rows, drawn from the layout in `tv`.
+void Ui::paintTask() {
+  if (!tv.on) return;
+  const Palette& P = g.pal;
+  const Task& t = app.model.s.task;
+  if (tv.card.w > 0) {
+    if (!visible(tv.card.inset(-8))) return;
+    g.fillRound(tv.card, 14, P.panel);
+    g.strokeRound(tv.card, 14, P.line, 1);
+    TextStyle lab = T(11, 600, P.text3);
+    lab.spacing = .16f;
+    g.text(L"TASK", tv.label, lab);
+  }
+  auto checkbox = [&](const R& b, bool done, bool partial, bool hv) {
+    if (done) {
+      g.fillRound(b, 5, P.accent);
+      g.icon("i-check", b.cx(), b.cy(), 12, P.accentInk, false, 2.2f);
+    } else {
+      g.strokeRound(b, 5, hv ? P.text3 : P.line2, 1.5f);
+      if (partial) g.fillRound({b.x + 4, b.cy() - 1, b.w - 8, 2}, 1, P.accent);  // some of the steps are ticked
+    }
+  };
+  for (const TaskRow& r : tv.rows) {
+    const bool editing = taskEdit_ == r.part;  // the editor draws the text
+    if (r.kind == TR_EMPTY || r.kind == TR_ADD) {
+      const bool hv = hot(H_TADD, r.kind == TR_EMPTY ? 0 : 1);
+      const Color c = hv ? P.text2 : P.text3;
+      if (r.kind == TR_EMPTY) g.strokeRound(r.row, 10, hv ? P.text3 : P.line2, 1, true);
+      else if (hv && !editing) g.fillRound(r.row, 8, P.hover);  // not under the editor, which has the card's own colour
+      g.icon("i-plus", r.box.cx(), r.box.cy(), 14, c);
+      if (!editing) g.text(r.kind == TR_ADD ? L"Add a step" : L"What are you working on?", r.text, T(12.5f, 400, c));
+      continue;
+    }
+    const bool title = r.kind == TR_TITLE;
+    const wstring& text = title ? t.text : t.steps[(size_t)r.part - 1].text;
+    const bool done = title ? t.finished() : t.steps[(size_t)r.part - 1].done;
+    const bool hv = hot(H_TTEXT, r.part) || hot(H_TCHECK, r.part) || hot(H_TDEL, r.part);
+    if (hv && !editing) g.fillRound(r.row, 8, P.hover);
+    checkbox(r.box, done, title && !done && t.stepsDone() > 0, hot(H_TCHECK, r.part));
+    const TextStyle st = taskStyle(title, done);
+    if (!editing) {
+      g.text(text, r.text, st);
+      if (done) g.fill({r.text.x, r.text.cy() + .5f, std::min(g.measure(text, st), r.text.w), 1}, A(P.text3, .9f));
+    }
+    if (hv && !editing) {
+      const bool x = hot(H_TDEL, r.part);
+      if (x) g.fillRound(r.del, 6, P.raised);
+      g.icon("i-x", r.del.cx(), r.del.cy(), 14, x ? P.text : P.text2);
+    } else if (title && !t.steps.empty()) {
+      g.text(std::to_wstring(t.stepsDone()) + L"/" + std::to_wstring(t.steps.size()), r.del, T(11, 500, P.text3, TX_RIGHT));
+    }
+  }
+}
+
+// "Start again", in the ring of a finished plan: the same accent as the big play button, which does the same.
+void Ui::paintAgain(const R& r) {
+  const Palette& P = g.pal;
+  g.fillRound(r, r.h / 2, hot(H_AGAIN) ? mixColor(P.accent, rgb(0xffffff), .07f) : P.accent);
+  const TextStyle ts = T(13, 600, P.accentInk);
+  const wstring words = L"Start again";
+  const float tw = g.measure(words, ts), iw = 14, gap = 7, x = r.cx() - (iw + gap + tw) / 2;
+  g.icon("i-reset", x + iw / 2, r.cy(), iw, P.accentInk, false, 3.f);
+  g.text(words, {x + iw + gap, r.y, tw + 2, r.h}, ts);
+}
+
+// The loop picker: how many sets to run, 1 (no loop) to 6 or until stopped. The line under the cells says what the cell under
+// the pointer, or else the one chosen, comes to.
+void Ui::paintLoopMenu() {
+  const Palette& P = g.pal;
+  const R s = sheetRect();
+  if (!visible(s.inset(-24))) return;  // a small repaint elsewhere (the clock) leaves it alone
+  shadow(s, 14, 1.1f);
+  g.fillRound(s, 14, P.panel);
+  g.strokeRound(s, 14, P.line2, 1);
+  TextStyle lab = T(11, 600, P.text3);
+  lab.spacing = .16f;
+  g.text(L"SETS", {s.x + LP_PAD, s.y + 4, 120, 22}, lab);
+
+  const R sg = loopSeg();
+  g.fillRound(sg, 10, P.bg);
+  g.strokeRound(sg, 10, P.line, 1);
+  const int choice = app.setsChoice(), lit = loopCell(choice);
+  int over = -1;
+  for (int i = 0; i < LOOP_CELLS; i++) {
+    const R c = loopCellRect(i);
+    const bool sel = i == lit, hv = hot(H_LSET, i);
+    if (hv) over = i;
+    if (sel) {
+      g.fillRound(c, 8, P.raised);
+      g.strokeRound(c.inset(-1), 9, P.line2, 1);
+    } else if (hv) {
+      g.fillRound(c, 8, P.hover);
+    }
+    // the choices that loop are lit in the accent, "1" (no loop) in plain text
+    const Color ink = sel ? (i == 0 ? P.text : P.accent) : (hv ? P.text : P.text2);
+    g.text(i == LOOP_CELLS - 1 ? L"∞" : std::to_wstring(i + 1), c, T(i == LOOP_CELLS - 1 ? 14.f : 13.f, 600, ink, TX_CENTER));
+  }
+  g.text(loopCaption(over >= 0 ? loopChoice(over) : choice), {s.x + LP_PAD, sg.b() + 4, s.w - 2 * LP_PAD, LP_FOOT - 8}, T(12, 400, P.text2));
 }
 
 void Ui::paintSpectrum() {
@@ -480,9 +676,26 @@ void Ui::paintSide() {
     g.icon(tabIcons[i], L.tab[i].cx(), L.tab[i].cy(), 18, sel ? P.accent : (hv ? P.text : P.text2));
   }
   if (m.s.tab == "stream") {
+    iconBtn(L.spot, "i-spotify", hot(H_SPOT), 20, 1, m.attached() != nullptr);
     iconBtn(L.link, "i-link", hot(H_LINK), 20, 1, linkOpen_);
     iconBtn(L.power, "i-video", hot(H_VIDEO), 20, m.s.streamOn ? 1.f : .5f);
-    if (m.s.streamOn) {
+    if (spotifyCard()) {
+      paintSpotify();
+      if (visible(L.vbar)) {  // previous song, the playlist's name, next song, and the cross that takes the playlist off
+        iconBtn(L.vPrev, "i-prev", hot(H_VPREV), 20);
+        iconBtn(L.vNext, "i-next", hot(H_VNEXT), 20);
+        iconBtn(L.vClear, "i-x", hot(H_VCLEAR), 20);
+        const Attach* at = m.attached();
+        TextStyle vt = T(12.5f, 400, P.text2, TX_CENTER);
+        vt.ellipsis = true;
+        g.text(at && !at->name.empty() ? at->name : wstring(L"Spotify playlist"), L.vTitle, vt);
+      }
+      if (linkOpen_ && visible(L.linkForm)) {
+        g.fillRound(L.linkInput, 8, P.panel);
+        g.strokeRound(L.linkInput, 8, P.line2, 1);
+        iconBtn(L.linkGo, "i-check", hot(H_LINKGO), 20, 1, true);
+      }
+    } else if (m.s.streamOn) {
       paintPlayer();
       if (!L.playerNone && visible(L.vbar)) {
         if (L.vPrev.w > 0) iconBtn(L.vPrev, "i-prev", hot(H_VPREV), 20);
@@ -516,7 +729,7 @@ void Ui::paintSide() {
 void Ui::paintBalance() {
   const Palette& P = g.pal;
   const int blend = clampi(app.model.s.blend, 0, 100);
-  const bool streamTab = app.model.s.tab == "stream";
+  const bool streamTab = app.model.s.tab == "stream" && !spotifyCard();  // a playlist is music, not a video
   const BalanceWords words = balanceWords(blend, streamTab);
   const Color cL = P.accent, cR = P.calm;
   const Color lean = words.side < 0 ? cL : words.side > 0 ? cR : P.text;
@@ -592,6 +805,167 @@ void Ui::paintPlayer() {
     g.fillRound(w, 8, rgb(0x0c0e11, hot(H_WATCH) ? .85f : .6f));
     g.icon(app.videoWindow ? "i-shrink" : "i-expand", w.cx(), w.cy(), 18, rgb(0xffffff));
   }
+}
+
+// The Spotify card: the cover, the song and who plays it, and whether Spotify gets to record it. The cover carries what the
+// player would: a spinner while the playlist starts, a play mark while Murmur is stopped, a warning when it could not play.
+void Ui::paintSpotify() {
+  const R p = L.player;
+  if (!visible(p.inset(-2))) return;
+  const Palette& P = g.pal;
+  const Attach* at = app.model.attached();
+  const StreamState st = app.streamState;
+  const bool live = app.spotifyOn && app.spNow.ok && st != SS_ERROR;  // a song is known
+  g.fillRound(p, 12, P.panel);
+  g.strokeRound(p, 12, hot(H_PLAYER) ? P.line2 : P.line, 1);
+
+  const R c = L.cover;
+  g.fillRound(c, 8, P.raised);
+  if (ID2D1Bitmap* bmp = posterBitmap()) {
+    const D2D1_SIZE_F sz = bmp->GetSize();
+    const float sc = std::max(c.w / sz.width, c.h / sz.height), dw = sz.width * sc, dh = sz.height * sc;
+    g.pushRoundClip(c, 8);
+    g.rt->DrawBitmap(bmp, D2D1::RectF(c.cx() - dw / 2, c.cy() - dh / 2, c.cx() + dw / 2, c.cy() + dh / 2), 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+    g.popLayer();
+  } else {
+    g.icon("i-spotify", c.cx(), c.cy(), 32, P.text3);
+  }
+  const float cx = c.cx(), cy = c.cy();
+  if (st == SS_LOADING) {
+    g.fillRound(c, 8, rgb(0x0c0e11, .55f));
+    g.strokeCircle(cx, cy, 13, rgb(0xffffff, .25f), 2);
+    g.arc(cx, cy, 13, spinnerAngle, 90, rgb(0xffffff), 2);
+  } else if (st == SS_ERROR) {
+    g.fillRound(c, 8, rgb(0x0c0e11, .55f));
+    g.icon("i-alert", cx, cy, 26, P.danger);
+  } else if (!app.running) {
+    g.fillCircle(cx, cy, 20, rgb(0x0c0e11, hot(H_PLAYER) ? .8f : .6f));
+    g.strokeCircle(cx, cy, 19.5f, rgb(0xffffff, .3f), 1);
+    g.icon("i-play", cx + 1, cy, 20, rgb(0xffffff), true);
+  }
+
+  // the words: whose music this is and whether it is private, then the song, then who plays it
+  const bool priv = shownPrivate();
+  const float tx = c.r() + 14, tr = p.r() - 14;
+  TextStyle lab = T(10.5f, 600, P.text3);
+  lab.spacing = .14f;
+  const float lw = g.measure(L"SPOTIFY", lab);
+  g.text(L"SPOTIFY", {tx, p.y + 15, lw + 2, 16}, lab);
+  TextStyle pv = lab;
+  pv.color = priv ? P.ok : P.danger;
+  g.text(priv ? L"PRIVATE" : L"NOT PRIVATE", {tx + lw + 9, p.y + 15, L.lock.x - 4 - (tx + lw + 9), 16}, pv);
+
+  const wstring title = live ? app.spNow.title : (at && !at->name.empty() ? at->name : wstring(L"Spotify playlist"));
+  const wstring sub = live ? app.spNow.artists
+                           : st == SS_LOADING ? wstring(L"Starting\u2026") : st == SS_ERROR ? wstring(L"Could not play. Click to try again") : wstring(L"Playlist");
+  TextStyle ts = T(14.5f, 600, P.text);
+  ts.ellipsis = true;
+  g.text(title, {tx, p.y + 42, tr - tx, 22}, ts);
+  TextStyle ss = T(12.5f, 400, st == SS_ERROR ? P.danger : P.text2);
+  ss.ellipsis = true;
+  g.text(sub, {tx, p.y + 66, tr - tx, 18}, ss);
+
+  if (hot(H_LOCK)) g.fillRound(L.lock, 8, P.hover);
+  g.icon(priv ? "i-lock" : "i-unlock", L.lock.cx(), L.lock.cy(), 18, priv ? P.ok : P.danger);
+}
+
+// The playlist picker: a filter line, the playlists it leaves, and a line of help under them.
+void Ui::paintPicker() {
+  const Palette& P = g.pal;
+  g.fill({0, 0, W_, H_}, rgb(0x05060a, .6f));
+  const R s = sheetRect();
+  shadow(s, 14, 1.4f);
+  g.fillRound(s, 14, P.panel);
+  g.strokeRound(s, 14, P.line2, 1);
+  g.icon("i-spotify", s.x + 30, s.y + 28, 20, P.text2);
+  TextStyle head = T(14, 600, P.text);
+  head.ellipsis = true;
+  g.text(L"Playlist for " + app.model.scene().name, {s.x + 50, s.y + 12, s.w - 50 - 56, 32}, head);
+  iconBtn({s.r() - 12 - 32, s.y + 12, 32, 32}, "i-x", hot(H_SHEETCLOSE));
+
+  const R sr = pickSearchRect();
+  g.fillRound(sr, 9, P.bg);
+  g.strokeRound(sr, 9, P.line2, 1);
+  g.icon("i-search", sr.x + 18, sr.cy(), 16, P.text3);
+  const float fx = sr.x + 36, fw = sr.w - 36 - 12;
+  float caret = fx;
+  if (pickFilter_.empty()) {
+    g.text(L"Find a playlist, or paste its link", {fx + 5, sr.y, fw, sr.h}, T(13, 400, P.text3));
+  } else {
+    TextStyle fs = T(13, 400, P.text);
+    // measure with a mark on the end: a space typed last has no width of its own
+    const float tw = std::min(g.measure(pickFilter_ + L"|", fs) - g.measure(L"|", fs), fw - 4);
+    fs.ellipsis = true;
+    g.text(pickFilter_, {fx, sr.y, fw, sr.h}, fs);
+    caret = fx + tw + 1;
+  }
+  g.fill({caret, sr.cy() - 8, 1.5f, 16}, P.accent);
+
+  const R lr = pickListRect();
+  const Attach* at = app.model.attached();
+  g.pushClip(lr);
+  for (int i = 0; i < (int)pick_.size(); i++) {
+    const R row = {lr.x, lr.y + i * PK_ROW - pickScroll_, lr.w, PK_ROW - 2};
+    if (row.b() <= lr.y || row.y >= lr.b()) continue;
+    const PickRow& r = pick_[(size_t)i];
+    const bool sel = i == pickSel_, hv = hot(H_PICK, i);
+    if (sel) {
+      g.fillRound(row, 9, P.raised);
+      g.strokeRound(row, 9, P.line2, 1);
+    } else if (hv) {
+      g.fillRound(row, 9, P.hover);
+    }
+    wstring name, sub;
+    const char* icon = "i-note";
+    bool current = false;
+    if (r.kind == PickRow::None) {
+      icon = "i-video";
+      name = L"No playlist";
+      sub = L"Play the scene\u2019s live stream";
+    } else if (r.kind == PickRow::Link) {
+      icon = "i-link";
+      name = L"Use this link";
+      const string uri = parseSpotifyLink(narrow(pickFilter_));
+      sub = uri.find(":album:") != string::npos ? L"An album" : uri.find(":artist:") != string::npos ? L"An artist" : L"A playlist";
+    } else {
+      const SpotifyList& l = lists_[(size_t)r.index];
+      name = l.name;
+      sub = l.owner;
+      if (l.tracks >= 0) sub += (sub.empty() ? L"" : L" \u00B7 ") + std::to_wstring(l.tracks) + (l.tracks == 1 ? L" song" : L" songs");
+      current = at && at->uri == l.uri;
+    }
+    g.icon(icon, row.x + 22, row.cy(), 18, current ? P.accent : (sel || hv ? P.text : P.text2));
+    const float nx = row.x + 44, nw = row.w - 44 - (current ? 40 : 14);
+    TextStyle ns = T(13.5f, 500, current ? P.accent : P.text);
+    ns.ellipsis = true;
+    TextStyle sbs = T(11.5f, 400, P.text3);
+    sbs.ellipsis = true;
+    if (sub.empty()) {
+      g.text(name, {nx, row.y, nw, row.h}, ns);
+    } else {
+      g.text(name, {nx, row.y + 4, nw, 20}, ns);
+      g.text(sub, {nx, row.y + 23, nw, 15}, sbs);
+    }
+    if (current) g.icon("i-check", row.r() - 22, row.cy(), 16, P.accent, false, 2.f);
+  }
+  g.popClip();
+  // a thin bar at the right when the list is longer than the window
+  const float total = (float)pick_.size() * PK_ROW;
+  if (total > lr.h + 0.5f) {
+    const float th = std::max(24.f, lr.h * lr.h / total), ty = lr.y + (lr.h - th) * pickScroll_ / (total - lr.h);
+    g.fillRound({lr.r() - 3, ty, 3, th}, 1.5f, P.line2);
+  }
+  if (pick_.empty()) {
+    const wchar_t* words = !listsLoaded_ ? L"Reading your playlists\u2026"
+                           : lists_.empty() ? L"Copy a playlist\u2019s link in Spotify, then press Ctrl+V"
+                                            : L"No playlist with that name";
+    g.text(words, {lr.x, lr.y, lr.w, std::min(lr.h, 120.f)}, T(13, 400, P.text3, TX_CENTER));
+  }
+
+  const R foot = {s.x + 20, s.b() - PK_FOOT, s.w - 40, PK_FOOT - 4};
+  const bool priv = app.model.s.spotifyPrivate;
+  g.icon(priv ? "i-lock" : "i-unlock", foot.x + 7, foot.cy(), 14, priv ? P.ok : P.danger);
+  g.text(priv ? L"Private: Spotify does not record what plays here" : L"Not private: Spotify records what plays here", {foot.x + 20, foot.y, foot.w - 20, foot.h}, T(11.5f, 400, P.text3));
 }
 
 // The player on a PC without mpv or yt-dlp: one button that fetches them, and a bar while it does.
@@ -766,23 +1140,27 @@ void Ui::paintOverlays() {
 const vector<KeyRow>& keyRows() {
   static const vector<KeyRow> rows = {
       {{L"Space"}, {"i-play"}}, {{L"←", L"→"}, {"i-prev", "i-next"}}, {{L"↑", L"↓"}, {"i-vol"}}, {{L"M"}, {"i-mute"}},
-      {{L"1", L"–", L"8"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"R"}, {"i-repeat"}}, {{L"V"}, {"i-video"}}, {{L"N"}, {"i-mini"}},
-      {{L"Ctrl", L"V"}, {"i-link"}}};
+      {{L"1", L"–", L"8"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"R"}, {"i-repeat"}}, {{L"T"}, {"i-task"}}, {{L"V"}, {"i-video"}},
+      {{L"S"}, {"i-spotify"}}, {{L"N"}, {"i-mini"}}, {{L"Ctrl", L"V"}, {"i-link"}}};
   return rows;
 }
 
 void Ui::paintSheet() {
+  if (sheet_ == 4) { paintLoopMenu(); return; }  // a small panel over the page, which stays as it is
+  if (sheet_ == 5) { paintPicker(); return; }
+  if (sheet_ == 6) { paintPlugins(); return; }
   const Palette& P = g.pal;
   g.fill({0, 0, W_, H_}, rgb(0x05060a, .6f));
-  const float sw = std::min(440.f, W_ - 32), sh = sheet_ == 1 ? SHEET_EVIDENCE_H : SHEET_KEYS_H;
-  const R s = {(W_ - sw) / 2, std::max(8.f, (H_ - sh) / 2), sw, sh};
+  const R s = sheetRect();
   shadow(s, 14, 1.4f);
   g.fillRound(s, 14, P.panel);
   g.strokeRound(s, 14, P.line2, 1);
-  g.text(sheet_ == 1 ? L"Evidence" : L"Keys", {s.x + 20, s.y + 12, 200, 32}, T(14, 600, P.text));
+  g.text(sheet_ == 1 ? L"Evidence" : sheet_ == 2 ? L"Keys" : L"Task", {s.x + 20, s.y + 12, 200, 32}, T(14, 600, P.text));
   iconBtn({s.r() - 12 - 32, s.y + 12, 32, 32}, "i-x", hot(H_SHEETCLOSE));
 
-  if (sheet_ == 1) {
+  if (sheet_ == 3) {
+    paintTask();
+  } else if (sheet_ == 1) {
     static const float itemH[5] = {106, 80, 80, 105, 80};
     static const char* icons[5] = {"i-white", "i-vol", "i-bubble", "i-phones", "i-off"};
     static const wchar_t* titles[5] = {L"Noise", L"Volume", L"Lyrics", L"Beats", L"432 Hz · solfeggio"};
@@ -849,6 +1227,61 @@ void Ui::paintSheet() {
 }
 
 // ---------------------------------------------------------------------------------------------------
+// The Plugins sheet
+// ---------------------------------------------------------------------------------------------------
+
+void Ui::paintPlugins() {
+  const Palette& P = g.pal;
+  g.fill({0, 0, W_, H_}, rgb(0x05060a, .6f));
+  const R s = sheetRect();
+  shadow(s, 14, 1.4f);
+  g.fillRound(s, 14, P.panel);
+  g.strokeRound(s, 14, P.line2, 1);
+  g.text(L"Plugins", {s.x + 20, s.y + 12, 200, 32}, T(14, 600, P.text));
+  iconBtn({s.r() - 12 - 32, s.y + 12, 32, 32}, "i-x", hot(H_SHEETCLOSE));
+
+  const vector<PluginInfo>& list = app.plugins.list();
+  if (list.empty()) {
+    g.text(L"No plugins yet", {s.x + 20, s.y + PG_HEAD + 2, s.w - 40, 22}, T(13.5f, 600, P.text2));
+    g.text(L"A plugin is a folder you put in the plugins folder.", {s.x + 20, s.y + PG_HEAD + 26, s.w - 40, 20}, T(12.5f, 400, P.text3));
+  }
+  for (int i = 0; i < (int)list.size(); i++) {
+    const PluginInfo& p = list[(size_t)i];
+    const R row = plugRow(i), sw = plugSwitch(i);
+    const bool gear = p.usable() && p.on && p.settings;
+    g.fillRound(row, 10, P.raised);
+    g.strokeRound(row, 10, P.line, 1);
+    const float textW = (gear ? plugGear(i).x : p.usable() ? sw.x : row.r()) - 12 - (row.x + 14);
+    TextStyle name = T(13.5f, 600, p.usable() ? P.text : P.text2);
+    name.ellipsis = true;
+    g.text(p.name, {row.x + 14, row.y + 6, textW, 20}, name);
+    // the line under the name: what is wrong with it, else what it says of itself right now, else what it is
+    wstring line = p.about;
+    Color lc = P.text3;
+    if (!p.usable()) { line = p.error; lc = P.danger; }
+    else if (!p.note.empty()) { line = p.note; lc = P.danger; }
+    else if (p.on && !p.status.empty()) { line = p.status; lc = P.accent; }
+    TextStyle sub = T(12, 400, lc);
+    sub.ellipsis = true;
+    g.text(line, {row.x + 14, row.y + 26, textW, 18}, sub);
+    if (!p.usable()) continue;
+    if (gear) iconBtn(plugGear(i), "i-sliders", hot(H_PLUGSET, i), 18);
+    // its switch: the knob sits on the side it is set to
+    const bool hv = hot(H_PLUG, i);
+    g.fillRound(sw, sw.h / 2, p.on ? P.accent : (hv ? P.line2 : P.line));
+    if (!p.on) g.strokeRound(sw, sw.h / 2, P.line2, 1);
+    g.fillCircle(p.on ? sw.r() - 11 : sw.x + 11, sw.cy(), 7.5f, p.on ? P.accentInk : (hv ? P.text : P.text2));
+  }
+
+  const R fb = plugFolder();
+  const bool hv = hot(H_PLUGDIR);
+  if (hv) g.fillRound(fb, 8, P.hover);
+  g.strokeRound(fb, 8, P.line2, 1);
+  g.icon("i-folder", fb.x + 20, fb.cy(), 18, hv ? P.text : P.text2);
+  g.text(L"Open folder", {fb.x + 38, fb.y, fb.w - 44, fb.h}, T(12.5f, 500, hv ? P.text : P.text2));
+}
+
+// ---------------------------------------------------------------------------------------------------
 // The compact player
 // ---------------------------------------------------------------------------------------------------
 
@@ -870,10 +1303,15 @@ void Ui::paintMini() {
     }
     g.icon(stock[(size_t)i].icon.c_str(), r.cx(), r.cy(), 20, cur ? P.accent : (hv ? P.text : P.text2));
   }
-  if (visible(L.mute.inset(-4, -8))) {
-    iconBtn(L.mute, app.muted || m.s.master == 0 ? "i-mute" : "i-vol", hot(H_MUTE), 18);
-    slider(L.master, m.s.master);
+  // the volume, upright under the expand button, and mute at its foot
+  if (visible(R{L.master.x - 6, L.master.y - 4, L.master.w + 12, L.mute.b() - L.master.y + 8})) {
+    vslider(L.master, m.s.master);
+    iconBtn(L.mute, app.muted || m.s.master == 0 ? "i-mute" : "i-vol", hot(H_MUTE), 16);
   }
   iconBtn(L.miniBtn, "i-expand", hot(H_MINI), 18);
-  paintSpectrum();
+  // the task and its steps, under a hairline
+  if (L.taskCard.w > 0 && visible(L.taskCard.inset(0, -4))) {
+    g.fill({14, L.taskCard.y, W_ - 28, 1}, P.line);
+    paintTask();
+  }
 }
