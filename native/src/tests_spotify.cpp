@@ -1059,6 +1059,34 @@ void testSpotifyUi(TestLog& t) {
   bool hasS = false;
   for (const KeyRow& k : keyRows()) if (k.keys.size() == 1 && wstring(k.keys[0]) == L"S" && string(k.icons[0]) == "i-spotify") hasS = true;
   t.check("spotify ui: the Keys sheet lists S", hasS && (int)keyRows().size() == KEYS_ROWS);
+  {
+    // the Keys sheet is the manual for the keyboard: every row says in words what its key does
+    bool worded = true, hasOpen = false, hasHelp = false;
+    for (const KeyRow& k : keyRows()) {
+      worded = worded && k.label && wcslen(k.label) >= 4 && !k.keys.empty() && !k.icons.empty();
+      if (k.keys.size() == 2 && wstring(k.keys[0]) == L"Ctrl" && wstring(k.keys[1]) == L"O") hasOpen = true;
+      if (k.keys.size() == 1 && wstring(k.keys[0]) == L"?") hasHelp = true;
+    }
+    t.check("keys: every row says what its key does", worded);
+    t.check("keys: Ctrl O and ? are listed too", hasOpen && hasHelp);
+    t.check("keys: the sheet still fits the smallest window", SHEET_KEYS_H <= 640 - 16, std::to_string(SHEET_KEYS_H));
+    Rig k;
+    k.init(940, 640);
+    k.ui->key(VK_OEM_2, false, true);  // ?
+    const bool opened = k.ui->sheet() == 2;
+    vector<uint8_t> kpx;
+    UINT kw = 0, kh = 0;
+    const bool drew = renderUi(k, kpx, kw, kh);
+    // the words of the first row: lit pixels to the right of its icon, where there used to be nothing
+    const float sx = (940 - 440) / 2.f, sy = std::max(8.f, (640 - SHEET_KEYS_H) / 2);
+    int lit = 0;
+    for (int y = (int)(sy + 64); y < (int)(sy + 64 + 26); y++)
+      for (int x = (int)(sx + KEYS_LABEL_X); x < (int)(sx + KEYS_LABEL_X + 90); x++) {
+        const uint8_t* p = &kpx[((size_t)y * kw + (size_t)x) * 4];
+        if (p[0] > 110 && p[1] > 110 && p[2] > 110) lit++;
+      }
+    t.check("keys: ? opens the sheet, and the words are drawn", opened && drew && lit > 40, std::to_string(lit));
+  }
   t.check("streak ui: with no run of days the corner has nothing to say", ui.find(H_STATS).k == H_NONE);
   for (int i = 0; i < 4; i++) app.model.s.log[app.model.dayKey(app.model.nowFn() - (time_t)i * 86400)] = 45;
   ui.changed();

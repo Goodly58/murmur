@@ -1139,9 +1139,20 @@ void Ui::paintOverlays() {
 
 const vector<KeyRow>& keyRows() {
   static const vector<KeyRow> rows = {
-      {{L"Space"}, {"i-play"}}, {{L"←", L"→"}, {"i-prev", "i-next"}}, {{L"↑", L"↓"}, {"i-vol"}}, {{L"M"}, {"i-mute"}},
-      {{L"1", L"–", L"8"}, {"i-target"}}, {{L"B"}, {"i-phones"}}, {{L"R"}, {"i-repeat"}}, {{L"T"}, {"i-task"}}, {{L"V"}, {"i-video"}},
-      {{L"S"}, {"i-spotify"}}, {{L"N"}, {"i-mini"}}, {{L"Ctrl", L"V"}, {"i-link"}}};
+      {{L"Space"}, {"i-play"}, L"Play, pause"},
+      {{L"←", L"→"}, {"i-prev", "i-next"}, L"Restart or skip the phase"},
+      {{L"↑", L"↓"}, {"i-vol"}, L"Volume"},
+      {{L"M"}, {"i-mute"}, L"Mute"},
+      {{L"1", L"–", L"8"}, {"i-target"}, L"Scene"},
+      {{L"B"}, {"i-phones"}, L"Beats mode"},
+      {{L"R"}, {"i-repeat"}, L"Loop the rounds"},
+      {{L"T"}, {"i-task"}, L"Task and its steps"},
+      {{L"V"}, {"i-video"}, L"Watch the stream"},
+      {{L"S"}, {"i-spotify"}, L"Spotify playlist"},
+      {{L"N"}, {"i-mini"}, L"Mini player"},
+      {{L"Ctrl", L"V"}, {"i-link"}, L"Play a copied link"},
+      {{L"Ctrl", L"O"}, {"i-note"}, L"Play your own music"},
+      {{L"?"}, {"i-keys"}, L"These keys"}};
   return rows;
 }
 
@@ -1221,6 +1232,10 @@ void Ui::paintSheet() {
         g.icon(ic, ix + 10, y + 13, 20, P.text2, solid);
         ix += 28;
       }
+      // and in words, so nobody has to guess what an icon stands for
+      TextStyle ls = T(13, 400, P.text2);
+      ls.ellipsis = true;
+      g.text(r.label, {s.x + KEYS_LABEL_X, y, s.w - KEYS_LABEL_X - 20, 26}, ls);
       y += 26 + 12;
     }
   }

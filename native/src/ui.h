@@ -4,8 +4,9 @@
 #include "app.h"
 #include "gfx.h"
 
-constexpr int KEYS_ROWS = 12;  // rows on the Keys sheet
+constexpr int KEYS_ROWS = 14;  // rows on the Keys sheet
 constexpr float SHEET_EVIDENCE_H = 546, SHEET_KEYS_H = 64 + KEYS_ROWS * 38 + 4;  // modal sheet heights (DIPs)
+constexpr float KEYS_LABEL_X = 212;  // where a row's words begin on the Keys sheet, after its keys and icons
 
 // The task card and sheet (DIPs): the task, up to four steps under it and the row that adds one. The card has a heading of its own;
 // the sheet already says "Task" at the top.
@@ -98,10 +99,11 @@ struct BalanceWords {
 };
 BalanceWords balanceWords(int blend, bool streamTab);
 
-// A row of the Keys sheet: the keys to press and the icons for what they do.
+// A row of the Keys sheet: the keys to press, the icons for what they do, and the same in a few words.
 struct KeyRow {
   vector<const wchar_t*> keys;
   vector<const char*> icons;
+  const wchar_t* label;
 };
 const vector<KeyRow>& keyRows();
 
